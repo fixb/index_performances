@@ -1,0 +1,1914 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LSEG Convertible Bond Indices — Analytics Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-primary: #0a0c10;
+  --bg-secondary: #11141b;
+  --bg-tertiary: #181c26;
+  --bg-card: #151922;
+  --border: #252a36;
+  --border-accent: #2d3344;
+  --text-primary: #e8eaed;
+  --text-secondary: #8b92a5;
+  --text-muted: #555d73;
+  --accent-green: #00e19a;
+  --accent-red: #ff4d6a;
+  --accent-blue: #4d8eff;
+  --accent-amber: #ffb84d;
+  --accent-purple: #a855f7;
+  --accent-cyan: #22d3ee;
+  --gradient-brand: linear-gradient(135deg, #00e19a 0%, #4d8eff 100%);
+  --font-mono: 'DM Mono', monospace;
+  --font-sans: 'Instrument Sans', sans-serif;
+  --radius: 8px;
+  --radius-lg: 12px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border-accent); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Header */
+.header {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(10,12,16,0.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+  height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.header-brand {
+  display: flex; align-items: center; gap: 12px;
+}
+.header-brand .logo {
+  width: 8px; height: 24px;
+  background: var(--gradient-brand);
+  border-radius: 2px;
+}
+.header-brand h1 {
+  font-family: var(--font-sans);
+  font-size: 15px; font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+.header-brand span {
+  font-size: 11px; font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+.header-status {
+  display: flex; align-items: center; gap: 16px;
+  font-size: 12px; color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.3s;
+}
+.status-dot.active { background: var(--accent-green); box-shadow: 0 0 8px rgba(0,225,154,0.5); }
+
+/* Tab Navigation */
+.tab-nav {
+  display: flex;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+  gap: 0;
+  overflow-x: auto;
+}
+.tab-btn {
+  padding: 12px 20px;
+  background: none; border: none;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+.tab-btn:hover { color: var(--text-secondary); }
+.tab-btn.active { color: var(--text-primary); }
+.tab-btn.active::after {
+  content: '';
+  position: absolute; bottom: 0; left: 12px; right: 12px;
+  height: 2px;
+  background: var(--gradient-brand);
+  border-radius: 1px 1px 0 0;
+}
+
+/* Main Content */
+.main { padding: 24px 32px; max-width: 1600px; margin: 0 auto; }
+.tab-content { display: none; }
+.tab-content.active { display: block; animation: fadeIn 0.25s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* Upload Zone */
+.upload-zone {
+  border: 2px dashed var(--border-accent);
+  border-radius: var(--radius-lg);
+  padding: 48px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  background: var(--bg-secondary);
+  margin-bottom: 24px;
+}
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: var(--accent-blue);
+  background: rgba(77,142,255,0.05);
+}
+.upload-zone h3 {
+  font-size: 16px; font-weight: 600;
+  margin-bottom: 8px;
+}
+.upload-zone p {
+  font-size: 13px; color: var(--text-muted);
+}
+.upload-zone .icon {
+  font-size: 32px; margin-bottom: 12px;
+  opacity: 0.4;
+}
+.file-list {
+  display: flex; gap: 12px; margin-top: 16px; justify-content: center; flex-wrap: wrap;
+}
+.file-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px;
+  background: rgba(0,225,154,0.1);
+  border: 1px solid rgba(0,225,154,0.2);
+  border-radius: 20px;
+  font-size: 12px; font-family: var(--font-mono);
+  color: var(--accent-green);
+}
+.file-tag .check { font-weight: 700; }
+
+/* Cards */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card-title {
+  font-size: 13px; font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+  display: flex; align-items: center; gap: 8px;
+}
+.card-title .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+}
+
+/* Grid layouts */
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.grid-4 { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+table {
+  width: 100%; border-collapse: collapse;
+  font-size: 12px; font-family: var(--font-mono);
+  min-width: max-content;
+}
+th {
+  text-align: left; padding: 10px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0;
+  white-space: nowrap;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px;
+}
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(37,42,54,0.5);
+  white-space: nowrap;
+}
+tr:hover td { background: rgba(77,142,255,0.03); }
+.pos { color: var(--accent-green); }
+.neg { color: var(--accent-red); }
+.rank-1 { color: var(--accent-green); font-weight: 700; }
+.rank-last { color: var(--accent-red); }
+
+/* Controls */
+.controls {
+  display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+}
+select, button.ctrl-btn {
+  padding: 7px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+select:focus, button.ctrl-btn:focus { outline: none; border-color: var(--accent-blue); }
+button.ctrl-btn:hover { background: var(--border); }
+button.ctrl-btn.active { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+label.ctrl-label {
+  font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.3px;
+  font-weight: 500;
+}
+
+/* KPI Boxes */
+.kpi-box {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.kpi-label {
+  font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+.kpi-value {
+  font-size: 20px; font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+/* Chart containers */
+.chart-container {
+  position: relative;
+  height: 350px;
+  margin: 12px 0;
+}
+.chart-container.tall { height: 450px; }
+
+/* Heatmap */
+.heatmap-cell {
+  text-align: center;
+  font-weight: 500;
+  min-width: 60px;
+}
+
+/* Legend inline */
+.legend-inline {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-secondary);
+}
+.legend-swatch {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+}
+
+/* File selector */
+.file-selector {
+  display: flex; gap: 8px; margin-bottom: 16px;
+}
+.file-selector button {
+  padding: 8px 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.file-selector button.active {
+  background: rgba(77,142,255,0.12);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+/* Responsive */
+@media (max-width: 1100px) {
+  .grid-2 { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .main { padding: 16px; }
+  .header { padding: 0 16px; }
+  .tab-nav { padding: 0 16px; }
+  .chart-container, .chart-container.tall { height: 300px; }
+}
+@media (max-width: 600px) {
+  .grid-4 { grid-template-columns: 1fr 1fr; }
+  .kpi-value { font-size: 16px; }
+}
+
+/* Tooltip for charts */
+.no-data-msg {
+  display: flex; align-items: center; justify-content: center;
+  height: 200px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-style: italic;
+}
+
+/* Matrix table */
+.matrix-table td, .matrix-table th {
+  text-align: center;
+  padding: 8px 10px;
+  min-width: 90px;
+}
+.matrix-table td.diag {
+  background: rgba(77,142,255,0.08);
+  font-weight: 700;
+}
+
+/* Date Range Bar */
+.date-bar {
+  display: none;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 32px;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.date-bar.visible { display: flex; }
+.date-bar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.date-input-group {
+  display: flex; align-items: center; gap: 8px;
+}
+.date-input-group input[type="date"] {
+  padding: 5px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+.date-input-group input[type="date"]:focus { border-color: var(--accent-blue); }
+.date-input-group input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
+.date-sep { color: var(--text-muted); font-size: 13px; }
+.date-slider-wrap {
+  flex: 1;
+  min-width: 200px;
+  position: relative;
+  height: 32px;
+  display: flex;
+  align-items: center;
+}
+.date-slider-track {
+  position: absolute;
+  left: 0; right: 0;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  top: 50%; transform: translateY(-50%);
+}
+.date-slider-fill {
+  position: absolute;
+  height: 4px;
+  background: var(--gradient-brand);
+  border-radius: 2px;
+  top: 50%; transform: translateY(-50%);
+  pointer-events: none;
+}
+.date-slider-wrap input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  left: 0; right: 0;
+  width: 100%;
+  height: 32px;
+  background: transparent;
+  pointer-events: none;
+  margin: 0;
+}
+.date-slider-wrap input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  border: 2px solid var(--accent-blue);
+  cursor: pointer;
+  pointer-events: all;
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.date-slider-wrap input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 8px rgba(77,142,255,0.5);
+}
+.date-slider-wrap input[type="range"]::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  border: 2px solid var(--accent-blue);
+  cursor: pointer;
+  pointer-events: all;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+.date-info {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.date-reset-btn {
+  padding: 4px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.date-reset-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+@media (max-width: 900px) {
+  .date-bar { padding: 10px 16px; gap: 10px; }
+  .date-slider-wrap { min-width: 150px; }
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-brand">
+    <div class="logo"></div>
+    <h1>LSEG CB Indices Analytics</h1>
+    <span>v2.0</span>
+  </div>
+  <div class="header-status">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Aucun fichier chargé</span>
+  </div>
+</header>
+
+<nav class="tab-nav" id="tabNav">
+  <button class="tab-btn active" data-tab="upload">Données</button>
+  <button class="tab-btn" data-tab="perf">Performances</button>
+  <button class="tab-btn" data-tab="calendar">Calendrier</button>
+  <button class="tab-btn" data-tab="distribution">Distributions</button>
+  <button class="tab-btn" data-tab="rolling">Glissant</button>
+  <button class="tab-btn" data-tab="stats">Statistiques</button>
+  <button class="tab-btn" data-tab="correl">Corrélations & Betas</button>
+  <button class="tab-btn" data-tab="ranking">Rankings</button>
+</nav>
+
+<div class="date-bar" id="dateBar">
+  <div class="date-bar-label">Période</div>
+  <div class="date-input-group">
+    <input type="date" id="dateStart">
+    <span class="date-sep">→</span>
+    <input type="date" id="dateEnd">
+  </div>
+  <div class="date-slider-wrap">
+    <div class="date-slider-track"></div>
+    <div class="date-slider-fill" id="sliderFill"></div>
+    <input type="range" id="sliderStart" min="0" max="100" value="0">
+    <input type="range" id="sliderEnd" min="0" max="100" value="100">
+  </div>
+  <div class="date-info" id="dateInfo">—</div>
+  <button class="date-reset-btn" id="dateReset">Reset</button>
+</div>
+
+<main class="main">
+
+  <!-- UPLOAD TAB -->
+  <div class="tab-content active" id="tab-upload">
+    <div class="upload-zone" id="uploadZone">
+      <div class="icon">⬆</div>
+      <h3>Charger les fichiers XLS</h3>
+      <p>Glissez-déposez ou cliquez pour sélectionner les fichiers Daily_History et Daily_Parity_Equity_Cash_History</p>
+      <input type="file" id="fileInput" multiple accept=".xls,.xlsx,.csv" style="display:none">
+      <div class="file-list" id="fileList"></div>
+    </div>
+    <div id="dataSummary"></div>
+  </div>
+
+  <!-- PERFORMANCE TAB -->
+  <div class="tab-content" id="tab-perf">
+    <div class="file-selector" id="perfFileSelector"></div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Performances cumulées (rebased 100)</div>
+      <div class="chart-container tall"><canvas id="chartCumPerf"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Performances cumulées</div>
+      <div class="table-wrap" id="tableCumulative"></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Performances annualisées (périodes ≥ 1Y uniquement)</div>
+      <div class="table-wrap" id="tableAnnualized"></div>
+    </div>
+  </div>
+
+  <!-- CALENDAR TAB -->
+  <div class="tab-content" id="tab-calendar">
+    <div class="file-selector" id="calFileSelector"></div>
+    <div class="controls">
+      <label class="ctrl-label">Indice:</label>
+      <select id="calIndex"></select>
+      <label class="ctrl-label">Fréquence:</label>
+      <select id="calFreq">
+        <option value="monthly">Mensuelle</option>
+        <option value="quarterly">Trimestrielle</option>
+        <option value="yearly" selected>Annuelle</option>
+      </select>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Heatmap des performances</div>
+      <div class="table-wrap" id="calHeatmap"></div>
+    </div>
+  </div>
+
+  <!-- DISTRIBUTION TAB -->
+  <div class="tab-content" id="tab-distribution">
+    <div class="file-selector" id="distFileSelector"></div>
+    <div class="controls">
+      <label class="ctrl-label">Fréquence:</label>
+      <select id="distFreq">
+        <option value="daily" selected>Journalière</option>
+        <option value="weekly">Hebdomadaire</option>
+        <option value="monthly">Mensuelle</option>
+        <option value="quarterly">Trimestrielle</option>
+        <option value="yearly">Annuelle</option>
+      </select>
+      <label class="ctrl-label">Indice:</label>
+      <select id="distIndex"></select>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Histogramme des rendements</div>
+        <div class="chart-container"><canvas id="chartHist"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>QQ-Plot vs Normal</div>
+        <div class="chart-container"><canvas id="chartQQ"></canvas></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Statistiques de distribution</div>
+      <div class="table-wrap" id="distStats"></div>
+    </div>
+  </div>
+
+  <!-- ROLLING TAB -->
+  <div class="tab-content" id="tab-rolling">
+    <div class="file-selector" id="rollFileSelector"></div>
+    <div class="controls">
+      <label class="ctrl-label">Fenêtre:</label>
+      <select id="rollWindow">
+        <option value="21">1 Mois (21j)</option>
+        <option value="63">3 Mois (63j)</option>
+        <option value="126">6 Mois (126j)</option>
+        <option value="252" selected>1 An (252j)</option>
+        <option value="756">3 Ans (756j)</option>
+        <option value="1260">5 Ans (1260j)</option>
+      </select>
+      <label class="ctrl-label">Métrique:</label>
+      <select id="rollMetric">
+        <option value="return">Performance</option>
+        <option value="vol">Volatilité</option>
+        <option value="sharpe">Sharpe Ratio</option>
+        <option value="drawdown">Max Drawdown</option>
+      </select>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Métriques glissantes</div>
+      <div class="chart-container tall"><canvas id="chartRolling"></canvas></div>
+    </div>
+  </div>
+
+  <!-- STATS TAB -->
+  <div class="tab-content" id="tab-stats">
+    <div class="file-selector" id="statsFileSelector"></div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Statistiques descriptives complètes</div>
+      <div class="table-wrap" id="tableDescStats"></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Drawdown cumulé</div>
+      <div class="chart-container tall"><canvas id="chartDrawdown"></canvas></div>
+    </div>
+  </div>
+
+  <!-- CORRELATIONS TAB -->
+  <div class="tab-content" id="tab-correl">
+    <div class="file-selector" id="correlFileSelector"></div>
+    <div class="controls">
+      <label class="ctrl-label">Fenêtre:</label>
+      <select id="correlWindow">
+        <option value="0">Toute la période</option>
+        <option value="63">3 Mois</option>
+        <option value="126">6 Mois</option>
+        <option value="252" selected>1 An</option>
+        <option value="756">3 Ans</option>
+      </select>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Matrice de corrélation</div>
+        <div class="table-wrap" id="correlMatrix"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Matrice de Beta (ligne = y, col = x)</div>
+        <div class="table-wrap" id="betaMatrix"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Corrélations glissantes (252j) vs premier indice</div>
+      <div class="chart-container tall"><canvas id="chartRollingCorrel"></canvas></div>
+    </div>
+  </div>
+
+  <!-- RANKING TAB -->
+  <div class="tab-content" id="tab-ranking">
+    <div class="file-selector" id="rankFileSelector"></div>
+    <div class="controls">
+      <label class="ctrl-label">Fenêtre mobile:</label>
+      <select id="rankWindow">
+        <option value="21">1 Mois</option>
+        <option value="63">3 Mois</option>
+        <option value="126">6 Mois</option>
+        <option value="252" selected>1 An</option>
+        <option value="756">3 Ans</option>
+      </select>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Rankings glissants</div>
+      <div class="chart-container tall"><canvas id="chartRanking"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Fréquence des rankings (%)</div>
+      <div class="table-wrap" id="rankFreqTable"></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ============================================================
+// GLOBAL STATE
+// ============================================================
+const STATE = {
+  datasets: {},       // { filename: { dates:[], columns:{name:[values]} } }
+  activeDataset: null,
+  dateRange: { startIdx: 0, endIdx: null }, // null = end of data
+  charts: {}
+};
+
+const COLORS = ['#4d8eff','#00e19a','#ff4d6a','#ffb84d','#a855f7','#22d3ee','#f472b6','#84cc16',
+                '#fb923c','#38bdf8','#e879f9','#34d399','#fbbf24','#f87171','#818cf8'];
+
+// Get the active dataset sliced to selected date range
+function getFilteredDataset() {
+  if (!STATE.activeDataset) return null;
+  const src = STATE.datasets[STATE.activeDataset];
+  const s = STATE.dateRange.startIdx || 0;
+  const e = (STATE.dateRange.endIdx != null ? STATE.dateRange.endIdx : src.dates.length - 1) + 1;
+  if (s === 0 && e === src.dates.length) return src;
+  const filtered = {
+    dates: src.dates.slice(s, e),
+    columns: {},
+    name: src.name
+  };
+  for (const c of Object.keys(src.columns)) {
+    filtered.columns[c] = src.columns[c].slice(s, e);
+  }
+  return filtered;
+}
+
+// ============================================================
+// TAB MANAGEMENT
+// ============================================================
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    // Show/hide date bar
+    const dateBar = document.getElementById('dateBar');
+    if (btn.dataset.tab === 'upload' || !STATE.activeDataset) {
+      dateBar.classList.remove('visible');
+    } else {
+      dateBar.classList.add('visible');
+    }
+    refreshTab(btn.dataset.tab);
+  });
+});
+
+function refreshTab(tab) {
+  if (!STATE.activeDataset) return;
+  const d = getFilteredDataset();
+  if (!d || d.dates.length < 2) return;
+  switch(tab) {
+    case 'perf': renderPerf(d); break;
+    case 'calendar': renderCalendar(d); break;
+    case 'distribution': renderDistribution(d); break;
+    case 'rolling': renderRolling(d); break;
+    case 'stats': renderStats(d); break;
+    case 'correl': renderCorrelations(d); break;
+    case 'ranking': renderRanking(d); break;
+  }
+}
+
+// ============================================================
+// FILE UPLOAD
+// ============================================================
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+function handleFiles(files) {
+  for (const file of files) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(ws, { raw: false });
+        parseDataset(file.name, json);
+      } catch(err) {
+        alert('Erreur lecture: ' + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+function parseDataset(name, json) {
+  if (!json.length) return;
+  const cols = Object.keys(json[0]);
+  const dateCol = cols[0];
+  const valueCols = cols.slice(1);
+  
+  const dates = [];
+  const columns = {};
+  valueCols.forEach(c => columns[c] = []);
+
+  for (const row of json) {
+    const d = parseDate(row[dateCol]);
+    if (!d) continue;
+    let valid = true;
+    const vals = {};
+    for (const c of valueCols) {
+      const v = parseFloat(String(row[c]).replace(',','.'));
+      if (isNaN(v)) { valid = false; break; }
+      vals[c] = v;
+    }
+    if (!valid) continue;
+    dates.push(d);
+    for (const c of valueCols) columns[c].push(vals[c]);
+  }
+
+  STATE.datasets[name] = { dates, columns, name };
+  if (!STATE.activeDataset) STATE.activeDataset = name;
+  updateUI();
+}
+
+function parseDate(s) {
+  if (!s) return null;
+  if (s instanceof Date) return s;
+  // Try MM/DD/YYYY
+  const parts = String(s).split('/');
+  if (parts.length === 3) {
+    const m = parseInt(parts[0]), d = parseInt(parts[1]), y = parseInt(parts[2]);
+    if (y > 1900 && m >= 1 && m <= 12) return new Date(y, m-1, d);
+  }
+  // ISO
+  const dt = new Date(s);
+  if (!isNaN(dt)) return dt;
+  return null;
+}
+
+function updateUI() {
+  // File list
+  const fileList = document.getElementById('fileList');
+  fileList.innerHTML = Object.keys(STATE.datasets).map(name => {
+    const d = STATE.datasets[name];
+    const n = d.dates.length;
+    const cols = Object.keys(d.columns).length;
+    return `<div class="file-tag"><span class="check">✓</span>${name} (${cols} indices, ${n} obs)</div>`;
+  }).join('');
+
+  // Status
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  dot.classList.add('active');
+  txt.textContent = Object.keys(STATE.datasets).length + ' fichier(s) chargé(s)';
+
+  // Build file selectors
+  buildFileSelectors();
+
+  // Data summary
+  renderSummary();
+
+  // Init date bar
+  initDateBar();
+}
+
+function buildFileSelectors() {
+  const ids = ['perfFileSelector','calFileSelector','distFileSelector','rollFileSelector',
+               'statsFileSelector','correlFileSelector','rankFileSelector'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = '';
+    Object.keys(STATE.datasets).forEach(name => {
+      const btn = document.createElement('button');
+      btn.textContent = shortName(name);
+      btn.className = name === STATE.activeDataset ? 'active' : '';
+      btn.onclick = () => {
+        STATE.activeDataset = name;
+        _dateBarInited = false; // Reset date bar for new dataset
+        buildFileSelectors();
+        initDateBar();
+        const activeTab = document.querySelector('.tab-btn.active').dataset.tab;
+        refreshTab(activeTab);
+      };
+      el.appendChild(btn);
+    });
+  });
+}
+
+function shortName(n) {
+  if (n.includes('Parity')) return 'Parity/Equity/Cash';
+  if (n.includes('History')) return 'Main Indices';
+  return n.replace(/_/g,' ').replace(/\.xls.*/,'');
+}
+
+function renderSummary() {
+  const el = document.getElementById('dataSummary');
+  let html = '';
+  for (const [name, d] of Object.entries(STATE.datasets)) {
+    const cols = Object.keys(d.columns);
+    const startDate = fmtDate(d.dates[0]);
+    const endDate = fmtDate(d.dates[d.dates.length-1]);
+    html += `<div class="card"><div class="card-title"><div class="dot"></div>${shortName(name)}</div>
+      <div class="grid-4">${cols.map(c => {
+        const vals = d.columns[c];
+        const ret = ((vals[vals.length-1]/vals[0])-1)*100;
+        return `<div class="kpi-box">
+          <div class="kpi-label">${c}</div>
+          <div class="kpi-value ${ret>=0?'pos':'neg'}">${ret>=0?'+':''}${ret.toFixed(1)}%</div>
+        </div>`;
+      }).join('')}</div>
+      <p style="margin-top:12px;font-size:12px;color:var(--text-muted);">${startDate} → ${endDate} · ${d.dates.length} observations</p>
+    </div>`;
+  }
+  el.innerHTML = html;
+  // populate index selectors
+  populateIndexSelectors();
+}
+
+function populateIndexSelectors() {
+  ['calIndex','distIndex'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel || !STATE.activeDataset) return;
+    const cols = Object.keys(STATE.datasets[STATE.activeDataset].columns);
+    const prev = sel.value;
+    sel.innerHTML = cols.map((c,i) => `<option value="${c}">${c}</option>`).join('');
+    // Restore previous selection if it still exists
+    if (prev && cols.includes(prev)) sel.value = prev;
+  });
+}
+
+// ============================================================
+// DATE RANGE BAR
+// ============================================================
+const sliderStart = document.getElementById('sliderStart');
+const sliderEnd = document.getElementById('sliderEnd');
+const dateStartInput = document.getElementById('dateStart');
+const dateEndInput = document.getElementById('dateEnd');
+const sliderFill = document.getElementById('sliderFill');
+const dateInfo = document.getElementById('dateInfo');
+const dateResetBtn = document.getElementById('dateReset');
+
+let _dateBarInited = false;
+
+function initDateBar() {
+  if (!STATE.activeDataset) return;
+  const src = STATE.datasets[STATE.activeDataset];
+  const n = src.dates.length;
+  if (n < 2) return;
+
+  sliderStart.max = n - 1;
+  sliderEnd.max = n - 1;
+
+  // If first init or dataset changed, reset to full range
+  if (!_dateBarInited || STATE.dateRange.endIdx == null || STATE.dateRange.endIdx >= n) {
+    STATE.dateRange.startIdx = 0;
+    STATE.dateRange.endIdx = n - 1;
+    _dateBarInited = true;
+  }
+
+  sliderStart.value = STATE.dateRange.startIdx;
+  sliderEnd.value = STATE.dateRange.endIdx;
+
+  dateStartInput.min = fmtDate(src.dates[0]);
+  dateStartInput.max = fmtDate(src.dates[n - 1]);
+  dateEndInput.min = fmtDate(src.dates[0]);
+  dateEndInput.max = fmtDate(src.dates[n - 1]);
+
+  syncDateInputsFromSliders();
+  updateSliderFill();
+  updateDateInfo();
+}
+
+function syncDateInputsFromSliders() {
+  if (!STATE.activeDataset) return;
+  const src = STATE.datasets[STATE.activeDataset];
+  const si = parseInt(sliderStart.value);
+  const ei = parseInt(sliderEnd.value);
+  dateStartInput.value = fmtDate(src.dates[si]);
+  dateEndInput.value = fmtDate(src.dates[ei]);
+}
+
+function updateSliderFill() {
+  const max = parseInt(sliderStart.max) || 1;
+  const s = parseInt(sliderStart.value);
+  const e = parseInt(sliderEnd.value);
+  const leftPct = (s / max) * 100;
+  const rightPct = (e / max) * 100;
+  sliderFill.style.left = leftPct + '%';
+  sliderFill.style.width = (rightPct - leftPct) + '%';
+}
+
+function updateDateInfo() {
+  if (!STATE.activeDataset) return;
+  const src = STATE.datasets[STATE.activeDataset];
+  const si = STATE.dateRange.startIdx;
+  const ei = STATE.dateRange.endIdx != null ? STATE.dateRange.endIdx : src.dates.length - 1;
+  const count = ei - si + 1;
+  dateInfo.textContent = count + ' obs';
+}
+
+function applyDateRange() {
+  const s = parseInt(sliderStart.value);
+  const e = parseInt(sliderEnd.value);
+  STATE.dateRange.startIdx = Math.min(s, e);
+  STATE.dateRange.endIdx = Math.max(s, e);
+  syncDateInputsFromSliders();
+  updateSliderFill();
+  updateDateInfo();
+  // refresh current tab
+  const activeTab = document.querySelector('.tab-btn.active').dataset.tab;
+  if (activeTab !== 'upload') refreshTab(activeTab);
+}
+
+// Debounce for smooth slider dragging
+let _sliderTimer = null;
+function onSliderInput() {
+  // Enforce no crossover
+  let s = parseInt(sliderStart.value);
+  let e = parseInt(sliderEnd.value);
+  if (s > e) {
+    // Swap: move the other thumb
+    if (this === sliderStart) sliderEnd.value = s;
+    else sliderStart.value = e;
+  }
+  updateSliderFill();
+  // Live update date inputs
+  syncDateInputsFromSliders();
+  // Debounced apply
+  clearTimeout(_sliderTimer);
+  _sliderTimer = setTimeout(applyDateRange, 120);
+}
+
+sliderStart.addEventListener('input', onSliderInput);
+sliderEnd.addEventListener('input', onSliderInput);
+
+// Date input change → find closest index and update sliders
+dateStartInput.addEventListener('change', () => {
+  if (!STATE.activeDataset) return;
+  const src = STATE.datasets[STATE.activeDataset];
+  const target = new Date(dateStartInput.value + 'T00:00:00');
+  let best = 0;
+  for (let i = 0; i < src.dates.length; i++) {
+    if (src.dates[i] <= target) best = i;
+    else break;
+  }
+  sliderStart.value = best;
+  applyDateRange();
+});
+
+dateEndInput.addEventListener('change', () => {
+  if (!STATE.activeDataset) return;
+  const src = STATE.datasets[STATE.activeDataset];
+  const target = new Date(dateEndInput.value + 'T00:00:00');
+  let best = src.dates.length - 1;
+  for (let i = src.dates.length - 1; i >= 0; i--) {
+    if (src.dates[i] >= target) best = i;
+    else break;
+  }
+  sliderEnd.value = best;
+  applyDateRange();
+});
+
+// Reset button
+dateResetBtn.addEventListener('click', () => {
+  if (!STATE.activeDataset) return;
+  const src = STATE.datasets[STATE.activeDataset];
+  sliderStart.value = 0;
+  sliderEnd.value = src.dates.length - 1;
+  applyDateRange();
+});
+
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+function fmtDate(d) {
+  return d.toISOString().slice(0,10);
+}
+function fmtPct(v, dec=2) {
+  if (v == null || isNaN(v)) return '—';
+  return (v >= 0 ? '+' : '') + v.toFixed(dec) + '%';
+}
+function pctClass(v) {
+  if (v == null || isNaN(v)) return '';
+  return v >= 0 ? 'pos' : 'neg';
+}
+function computeReturns(prices) {
+  const r = [];
+  for (let i = 1; i < prices.length; i++) r.push(prices[i] / prices[i-1] - 1);
+  return r;
+}
+function mean(arr) { return arr.reduce((a,b) => a+b, 0) / arr.length; }
+function stdev(arr) {
+  const m = mean(arr);
+  return Math.sqrt(arr.reduce((s,v) => s + (v-m)**2, 0) / (arr.length-1));
+}
+function covariance(a, b) {
+  const ma = mean(a), mb = mean(b);
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += (a[i]-ma)*(b[i]-mb);
+  return s / (a.length - 1);
+}
+function correlation(a, b) {
+  const sa = stdev(a), sb = stdev(b);
+  if (sa === 0 || sb === 0) return 0;
+  return covariance(a,b) / (sa * sb);
+}
+function beta(y, x) {
+  const sx = stdev(x);
+  if (sx === 0) return 0;
+  return covariance(y,x) / (sx * sx);
+}
+function skewness(arr) {
+  const m = mean(arr), s = stdev(arr), n = arr.length;
+  if (s === 0) return 0;
+  return (n / ((n-1)*(n-2))) * arr.reduce((acc,v) => acc + ((v-m)/s)**3, 0);
+}
+function kurtosis(arr) {
+  const m = mean(arr), s = stdev(arr), n = arr.length;
+  if (s === 0) return 0;
+  const k4 = arr.reduce((acc,v) => acc + ((v-m)/s)**4, 0) / n;
+  return k4 - 3; // excess kurtosis
+}
+function maxDrawdown(prices) {
+  let peak = prices[0], mdd = 0;
+  for (const p of prices) {
+    if (p > peak) peak = p;
+    const dd = (p - peak) / peak;
+    if (dd < mdd) mdd = dd;
+  }
+  return mdd;
+}
+function drawdownSeries(prices) {
+  const dd = [];
+  let peak = prices[0];
+  for (const p of prices) {
+    if (p > peak) peak = p;
+    dd.push((p - peak) / peak);
+  }
+  return dd;
+}
+function percentile(arr, p) {
+  const sorted = [...arr].sort((a,b) => a-b);
+  const idx = (p/100) * (sorted.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+function annualize(totalReturn, days) {
+  if (days <= 0) return 0;
+  return (Math.pow(1 + totalReturn, 252 / days) - 1);
+}
+
+function destroyChart(id) {
+  if (STATE.charts[id]) { STATE.charts[id].destroy(); delete STATE.charts[id]; }
+}
+
+function getWeeklyPrices(dates, prices) {
+  const weekly = { dates: [], prices: [] };
+  let lastWeek = -1;
+  for (let i = 0; i < dates.length; i++) {
+    const w = getWeekNumber(dates[i]);
+    const y = dates[i].getFullYear();
+    const key = y * 100 + w;
+    if (key !== lastWeek) {
+      if (weekly.dates.length > 0) {
+        weekly.dates.push(dates[i-1]);
+        weekly.prices.push(prices[i-1]);
+      }
+      lastWeek = key;
+    }
+  }
+  weekly.dates.push(dates[dates.length-1]);
+  weekly.prices.push(prices[prices.length-1]);
+  return weekly;
+}
+
+function getWeekNumber(d) {
+  const onejan = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil(((d - onejan) / 86400000 + onejan.getDay() + 1) / 7);
+}
+
+function getPeriodicReturns(dates, prices, freq) {
+  // returns array of {period, return}
+  const results = [];
+  let periodKey = d => '';
+  if (freq === 'daily') {
+    for (let i = 1; i < prices.length; i++) {
+      results.push({ period: fmtDate(dates[i]), ret: prices[i]/prices[i-1]-1 });
+    }
+    return results;
+  }
+  if (freq === 'weekly') periodKey = d => d.getFullYear()+'-W'+String(getWeekNumber(d)).padStart(2,'0');
+  if (freq === 'monthly') periodKey = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  if (freq === 'quarterly') periodKey = d => d.getFullYear()+'-Q'+Math.ceil((d.getMonth()+1)/3);
+  if (freq === 'yearly') periodKey = d => String(d.getFullYear());
+
+  let prevPrice = prices[0], prevKey = periodKey(dates[0]);
+  for (let i = 1; i < dates.length; i++) {
+    const k = periodKey(dates[i]);
+    if (k !== prevKey) {
+      results.push({ period: prevKey, ret: prices[i-1] / prevPrice - 1 });
+      prevPrice = prices[i-1];
+      prevKey = k;
+    }
+  }
+  // last period
+  results.push({ period: prevKey, ret: prices[prices.length-1] / prevPrice - 1 });
+  return results;
+}
+
+// ============================================================
+// PERFORMANCE TAB
+// ============================================================
+function renderPerf(d) {
+  const cols = Object.keys(d.columns);
+  populateIndexSelectors();
+
+  // Cumulative chart (rebased 100)
+  destroyChart('chartCumPerf');
+  const datasets = cols.map((c, i) => {
+    const prices = d.columns[c];
+    const rebased = prices.map(p => (p / prices[0]) * 100);
+    return {
+      label: c, data: rebased,
+      borderColor: COLORS[i % COLORS.length],
+      backgroundColor: 'transparent',
+      borderWidth: 1.5, pointRadius: 0, tension: 0.1
+    };
+  });
+  const labels = d.dates.map(fmtDate);
+  STATE.charts['chartCumPerf'] = new Chart(document.getElementById('chartCumPerf'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: chartOpts('Performance cumulée (base 100)', true)
+  });
+
+  // Annualized & Cumulative tables
+  // Find index of the closest date on or before a target date
+  function findDateIdx(dates, target) {
+    for (let i = dates.length - 1; i >= 0; i--) {
+      if (dates[i] <= target) return i;
+    }
+    return 0;
+  }
+
+  const lastDate = d.dates[d.dates.length - 1];
+  const lastIdx = d.dates.length - 1;
+
+  // WTD: reference = last trading day of previous week (before Monday)
+  const wtdRef = new Date(lastDate);
+  const dow = wtdRef.getDay() || 7; // Sunday=7
+  wtdRef.setDate(wtdRef.getDate() - dow); // Sunday before current week
+  wtdRef.setHours(0,0,0,0);
+
+  // MTD: reference = last trading day before 1st of current month
+  const mtdRef = new Date(lastDate.getFullYear(), lastDate.getMonth(), 0); // last day prev month
+  // QTD: reference = last trading day before 1st of current quarter
+  const qMonth = Math.floor(lastDate.getMonth() / 3) * 3;
+  const qtdRef = new Date(lastDate.getFullYear(), qMonth, 0); // last day prev quarter
+  // YTD: reference = last trading day before 1st Jan
+  const ytdRef = new Date(lastDate.getFullYear() - 1, 11, 31);
+
+  const periods = [
+    { label: '1D',   startIdx: Math.max(0, lastIdx - 1) },
+    { label: 'WTD',  startIdx: findDateIdx(d.dates, wtdRef) },
+    { label: 'MTD',  startIdx: findDateIdx(d.dates, mtdRef) },
+    { label: 'QTD',  startIdx: findDateIdx(d.dates, qtdRef) },
+    { label: 'YTD',  startIdx: findDateIdx(d.dates, ytdRef) },
+    { label: '1M',   startIdx: Math.max(0, lastIdx - 21) },
+    { label: '3M',   startIdx: Math.max(0, lastIdx - 63) },
+    { label: '6M',   startIdx: Math.max(0, lastIdx - 126) },
+    { label: '1Y',   startIdx: Math.max(0, lastIdx - 252) },
+    { label: '3Y',   startIdx: Math.max(0, lastIdx - 756) },
+    { label: '5Y',   startIdx: Math.max(0, lastIdx - 1260) },
+    { label: '10Y',  startIdx: Math.max(0, lastIdx - 2520) },
+    { label: 'Incep.', startIdx: 0 }
+  ];
+
+  let annHtml = '<table><tr><th>Indice</th>';
+  let cumHtml = '<table><tr><th>Indice</th>';
+  periods.forEach(p => { annHtml += `<th>${p.label}</th>`; cumHtml += `<th>${p.label}</th>`; });
+  annHtml += '</tr>'; cumHtml += '</tr>';
+
+  cols.forEach(c => {
+    const prices = d.columns[c];
+    annHtml += `<tr><td style="color:var(--text-primary);font-weight:500">${c}</td>`;
+    cumHtml += `<tr><td style="color:var(--text-primary);font-weight:500">${c}</td>`;
+    periods.forEach(p => {
+      const nDays = lastIdx - p.startIdx;
+      const cumRet = nDays > 0 ? prices[lastIdx] / prices[p.startIdx] - 1 : 0;
+      const annRet = nDays >= 252 ? annualize(cumRet, nDays) : cumRet;
+      const showAnn = nDays >= 252;
+      annHtml += `<td class="${pctClass(annRet)}">${showAnn ? fmtPct(annRet*100) : '—'}</td>`;
+      cumHtml += `<td class="${pctClass(cumRet)}">${fmtPct(cumRet*100)}</td>`;
+    });
+    annHtml += '</tr>'; cumHtml += '</tr>';
+  });
+  annHtml += '</table>'; cumHtml += '</table>';
+  document.getElementById('tableAnnualized').innerHTML = annHtml;
+  document.getElementById('tableCumulative').innerHTML = cumHtml;
+}
+
+function chartOpts(title, log = false) {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'bottom', labels: { color: '#8b92a5', font: { family: 'DM Mono', size: 10 }, boxWidth: 12, padding: 16 } },
+      title: { display: false },
+      tooltip: {
+        backgroundColor: '#1a1e2a', titleColor: '#e8eaed', bodyColor: '#8b92a5',
+        borderColor: '#252a36', borderWidth: 1, titleFont: { family: 'DM Mono', size: 11 },
+        bodyFont: { family: 'DM Mono', size: 11 }, padding: 10
+      }
+    },
+    scales: {
+      x: {
+        ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 },
+        grid: { color: 'rgba(37,42,54,0.5)' }
+      },
+      y: {
+        type: log ? 'logarithmic' : 'linear',
+        ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
+        grid: { color: 'rgba(37,42,54,0.5)' }
+      }
+    },
+    interaction: { intersect: false, mode: 'index' }
+  };
+}
+
+// ============================================================
+// CALENDAR TAB
+// ============================================================
+function renderCalendar(d) {
+  populateIndexSelectors();
+  const col = document.getElementById('calIndex').value;
+  const freq = document.getElementById('calFreq').value;
+  if (!col || !d.columns[col]) return;
+
+  const prices = d.columns[col];
+  const dates = d.dates;
+
+  if (freq === 'yearly') {
+    // Year performance table
+    const years = {};
+    let prevYearEnd = 0;
+    for (let i = 0; i < dates.length; i++) {
+      const y = dates[i].getFullYear();
+      if (!years[y]) years[y] = { start: i, end: i };
+      years[y].end = i;
+    }
+    let html = '<table><tr><th>Année</th><th>Performance</th><th>Barre</th></tr>';
+    const ykeys = Object.keys(years).sort();
+    const rets = [];
+    for (const y of ykeys) {
+      const si = years[y].start > 0 ? years[y].start - 1 : 0;
+      const ret = (prices[years[y].end] / prices[si] - 1) * 100;
+      rets.push(ret);
+    }
+    const maxAbs = Math.max(...rets.map(Math.abs), 1);
+    ykeys.forEach((y, i) => {
+      const ret = rets[i];
+      const w = Math.abs(ret) / maxAbs * 120;
+      const color = ret >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+      const dir = ret >= 0 ? 'right' : 'left';
+      html += `<tr>
+        <td style="font-weight:500">${y}</td>
+        <td class="${pctClass(ret)}">${fmtPct(ret)}</td>
+        <td><div style="display:flex;justify-content:${ret>=0?'flex-start':'flex-end'};width:240px;margin:${ret>=0?'0':'0 0 0 auto'}">
+          <div style="width:${w}px;height:14px;background:${color};opacity:0.6;border-radius:2px;"></div>
+        </div></td>
+      </tr>`;
+    });
+    html += '</table>';
+    document.getElementById('calHeatmap').innerHTML = html;
+  } else if (freq === 'monthly') {
+    // Monthly heatmap: years x months
+    const data = {};
+    for (let i = 0; i < dates.length; i++) {
+      const y = dates[i].getFullYear(), m = dates[i].getMonth();
+      const key = y + '-' + m;
+      if (!data[key]) data[key] = { start: i, end: i, year: y, month: m };
+      data[key].end = i;
+    }
+    const years = [...new Set(Object.values(data).map(v => v.year))].sort();
+    const months = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+    let html = '<table class="matrix-table"><tr><th></th>';
+    months.forEach(m => html += `<th>${m}</th>`);
+    html += '<th>Total</th></tr>';
+    years.forEach(y => {
+      html += `<tr><td style="font-weight:600">${y}</td>`;
+      let yearRet = 1;
+      months.forEach((_, m) => {
+        const key = y + '-' + m;
+        if (data[key]) {
+          const si = data[key].start > 0 ? data[key].start - 1 : 0;
+          const ret = (prices[data[key].end] / prices[si] - 1) * 100;
+          yearRet *= (1 + ret/100);
+          html += `<td class="heatmap-cell" style="background:${heatColor(ret)};color:#fff">${ret.toFixed(1)}</td>`;
+        } else {
+          html += '<td class="heatmap-cell">—</td>';
+        }
+      });
+      const yr = (yearRet - 1) * 100;
+      html += `<td class="heatmap-cell" style="background:${heatColor(yr)};color:#fff;font-weight:700">${yr.toFixed(1)}</td>`;
+      html += '</tr>';
+    });
+    html += '</table>';
+    document.getElementById('calHeatmap').innerHTML = html;
+  } else {
+    // Quarterly
+    const data = {};
+    for (let i = 0; i < dates.length; i++) {
+      const y = dates[i].getFullYear(), q = Math.ceil((dates[i].getMonth()+1)/3);
+      const key = y + '-Q' + q;
+      if (!data[key]) data[key] = { start: i, end: i, year: y, q };
+      data[key].end = i;
+    }
+    const years = [...new Set(Object.values(data).map(v => v.year))].sort();
+    let html = '<table class="matrix-table"><tr><th></th><th>Q1</th><th>Q2</th><th>Q3</th><th>Q4</th><th>Total</th></tr>';
+    years.forEach(y => {
+      html += `<tr><td style="font-weight:600">${y}</td>`;
+      let yearRet = 1;
+      [1,2,3,4].forEach(q => {
+        const key = y + '-Q' + q;
+        if (data[key]) {
+          const si = data[key].start > 0 ? data[key].start - 1 : 0;
+          const ret = (prices[data[key].end] / prices[si] - 1) * 100;
+          yearRet *= (1 + ret/100);
+          html += `<td class="heatmap-cell" style="background:${heatColor(ret)};color:#fff">${ret.toFixed(1)}</td>`;
+        } else {
+          html += '<td class="heatmap-cell">—</td>';
+        }
+      });
+      const yr = (yearRet - 1) * 100;
+      html += `<td class="heatmap-cell" style="background:${heatColor(yr)};color:#fff;font-weight:700">${yr.toFixed(1)}</td>`;
+      html += '</tr>';
+    });
+    html += '</table>';
+    document.getElementById('calHeatmap').innerHTML = html;
+  }
+}
+
+function heatColor(val) {
+  const capped = Math.max(-10, Math.min(10, val));
+  if (capped >= 0) {
+    const t = capped / 10;
+    const r = Math.round(20 * (1-t));
+    const g = Math.round(120 + 105 * t);
+    const b = Math.round(60 + 94 * t);
+    return `rgb(${r},${g},${b})`;
+  } else {
+    const t = -capped / 10;
+    const r = Math.round(120 + 135 * t);
+    const g = Math.round(60 * (1-t));
+    const b = Math.round(60 * (1-t));
+    return `rgb(${r},${g},${b})`;
+  }
+}
+
+document.getElementById('calIndex').addEventListener('change', () => { if (STATE.activeDataset) renderCalendar(getFilteredDataset()); });
+document.getElementById('calFreq').addEventListener('change', () => { if (STATE.activeDataset) renderCalendar(getFilteredDataset()); });
+
+// ============================================================
+// DISTRIBUTION TAB
+// ============================================================
+function renderDistribution(d) {
+  populateIndexSelectors();
+  const col = document.getElementById('distIndex').value;
+  const freq = document.getElementById('distFreq').value;
+  if (!col || !d.columns[col]) return;
+
+  const prices = d.columns[col];
+  const periodicRets = getPeriodicReturns(d.dates, prices, freq).map(r => r.ret * 100);
+
+  // Histogram
+  destroyChart('chartHist');
+  const nbins = Math.min(80, Math.max(20, Math.ceil(Math.sqrt(periodicRets.length))));
+  const minR = Math.min(...periodicRets), maxR = Math.max(...periodicRets);
+  const binWidth = (maxR - minR) / nbins;
+  const bins = Array(nbins).fill(0);
+  const binLabels = [];
+  for (let i = 0; i < nbins; i++) binLabels.push((minR + i * binWidth + binWidth/2).toFixed(2));
+  periodicRets.forEach(r => {
+    let idx = Math.floor((r - minR) / binWidth);
+    if (idx >= nbins) idx = nbins - 1;
+    if (idx < 0) idx = 0;
+    bins[idx]++;
+  });
+  const binPct = bins.map(b => b / periodicRets.length * 100);
+
+  STATE.charts['chartHist'] = new Chart(document.getElementById('chartHist'), {
+    type: 'bar',
+    data: {
+      labels: binLabels,
+      datasets: [{
+        data: binPct,
+        backgroundColor: binLabels.map(l => parseFloat(l) >= 0 ? 'rgba(0,225,154,0.5)' : 'rgba(255,77,106,0.5)'),
+        borderColor: binLabels.map(l => parseFloat(l) >= 0 ? '#00e19a' : '#ff4d6a'),
+        borderWidth: 1
+      }]
+    },
+    options: {
+      ...chartOpts(''),
+      plugins: { ...chartOpts('').plugins, legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 8 }, maxTicksLimit: 15 }, grid: { display: false } },
+        y: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 }, callback: v => v.toFixed(1)+'%' }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+
+  // QQ Plot
+  destroyChart('chartQQ');
+  const sorted = [...periodicRets].sort((a,b) => a - b);
+  const n = sorted.length;
+  const theoretical = [];
+  const actual = [];
+  for (let i = 0; i < n; i++) {
+    const p = (i + 0.5) / n;
+    theoretical.push(normalQuantile(p) * stdev(periodicRets.map(r=>r/100)) * 100 + mean(periodicRets));
+    actual.push(sorted[i]);
+  }
+  // Subsample for performance
+  const step = Math.max(1, Math.floor(n / 500));
+  const qqData = [];
+  for (let i = 0; i < n; i += step) {
+    qqData.push({ x: theoretical[i], y: actual[i] });
+  }
+  const minVal = Math.min(...theoretical, ...actual);
+  const maxVal = Math.max(...theoretical, ...actual);
+  STATE.charts['chartQQ'] = new Chart(document.getElementById('chartQQ'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        { label: 'QQ', data: qqData, backgroundColor: 'rgba(77,142,255,0.5)', borderColor: '#4d8eff', pointRadius: 2 },
+        { label: '45°', data: [{x:minVal,y:minVal},{x:maxVal,y:maxVal}], type: 'line', borderColor: '#555d73', borderDash: [4,4], pointRadius: 0, borderWidth: 1 }
+      ]
+    },
+    options: {
+      ...chartOpts(''),
+      plugins: { ...chartOpts('').plugins, legend: { display: false } },
+      scales: {
+        x: { title: { display: true, text: 'Théorique', color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 } }, grid: { color: 'rgba(37,42,54,0.5)' } },
+        y: { title: { display: true, text: 'Observé', color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+
+  // Distribution stats table for ALL indices
+  const cols = Object.keys(d.columns);
+  let html = '<table><tr><th>Statistique</th>';
+  cols.forEach(c => html += `<th>${c}</th>`);
+  html += '</tr>';
+  const allRets = {};
+  cols.forEach(c => { allRets[c] = getPeriodicReturns(d.dates, d.columns[c], freq).map(r => r.ret * 100); });
+  const stats = ['Observations','Moyenne (%)','Médiane (%)','Écart-type (%)','Skewness','Kurtosis (exc.)','Min (%)','Max (%)','P5 (%)','P25 (%)','P75 (%)','P95 (%)','% Positifs'];
+  stats.forEach(stat => {
+    html += `<tr><td style="font-weight:500;color:var(--text-primary)">${stat}</td>`;
+    cols.forEach(c => {
+      const r = allRets[c];
+      let val = '';
+      switch(stat) {
+        case 'Observations': val = r.length; break;
+        case 'Moyenne (%)': val = mean(r).toFixed(3); break;
+        case 'Médiane (%)': val = percentile(r, 50).toFixed(3); break;
+        case 'Écart-type (%)': val = stdev(r).toFixed(3); break;
+        case 'Skewness': val = skewness(r).toFixed(3); break;
+        case 'Kurtosis (exc.)': val = kurtosis(r).toFixed(3); break;
+        case 'Min (%)': val = Math.min(...r).toFixed(3); break;
+        case 'Max (%)': val = Math.max(...r).toFixed(3); break;
+        case 'P5 (%)': val = percentile(r, 5).toFixed(3); break;
+        case 'P25 (%)': val = percentile(r, 25).toFixed(3); break;
+        case 'P75 (%)': val = percentile(r, 75).toFixed(3); break;
+        case 'P95 (%)': val = percentile(r, 95).toFixed(3); break;
+        case '% Positifs': val = (r.filter(v => v >= 0).length / r.length * 100).toFixed(1); break;
+      }
+      html += `<td>${val}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</table>';
+  document.getElementById('distStats').innerHTML = html;
+}
+
+// Standard normal quantile approximation (Beasley-Springer-Moro)
+function normalQuantile(p) {
+  if (p <= 0) return -8; if (p >= 1) return 8;
+  if (p < 0.5) return -rationalApprox(Math.sqrt(-2 * Math.log(p)));
+  else return rationalApprox(Math.sqrt(-2 * Math.log(1 - p)));
+}
+function rationalApprox(t) {
+  const c = [2.515517, 0.802853, 0.010328];
+  const d = [1.432788, 0.189269, 0.001308];
+  return t - (c[0] + c[1]*t + c[2]*t*t) / (1 + d[0]*t + d[1]*t*t + d[2]*t*t*t);
+}
+
+document.getElementById('distFreq').addEventListener('change', () => { if (STATE.activeDataset) renderDistribution(getFilteredDataset()); });
+document.getElementById('distIndex').addEventListener('change', () => { if (STATE.activeDataset) renderDistribution(getFilteredDataset()); });
+
+// ============================================================
+// ROLLING TAB
+// ============================================================
+function renderRolling(d) {
+  const win = parseInt(document.getElementById('rollWindow').value);
+  const metric = document.getElementById('rollMetric').value;
+  const cols = Object.keys(d.columns);
+
+  destroyChart('chartRolling');
+  const datasets = cols.map((c, ci) => {
+    const prices = d.columns[c];
+    const values = [];
+    const labels = [];
+    for (let i = win; i < prices.length; i++) {
+      const slice = prices.slice(i - win, i + 1);
+      let val;
+      switch(metric) {
+        case 'return':
+          val = (slice[slice.length-1] / slice[0] - 1) * 100;
+          if (win >= 252) val = (annualize(slice[slice.length-1]/slice[0]-1, win)) * 100;
+          break;
+        case 'vol':
+          const rets = computeReturns(slice);
+          val = stdev(rets) * Math.sqrt(252) * 100;
+          break;
+        case 'sharpe':
+          const r2 = computeReturns(slice);
+          const annRet = annualize(slice[slice.length-1]/slice[0]-1, win);
+          const annVol = stdev(r2) * Math.sqrt(252);
+          val = annVol > 0 ? annRet / annVol : 0;
+          break;
+        case 'drawdown':
+          val = maxDrawdown(slice) * 100;
+          break;
+      }
+      values.push(val);
+      if (ci === 0) labels.push(fmtDate(d.dates[i]));
+    }
+    return {
+      label: c, data: values,
+      borderColor: COLORS[ci % COLORS.length],
+      backgroundColor: 'transparent',
+      borderWidth: 1.3, pointRadius: 0, tension: 0.1
+    };
+  });
+
+  const labels = [];
+  for (let i = win; i < d.dates.length; i++) labels.push(fmtDate(d.dates[i]));
+
+  const metricLabels = { return: 'Performance (%)', vol: 'Volatilité annualisée (%)', sharpe: 'Sharpe Ratio', drawdown: 'Max Drawdown (%)' };
+  STATE.charts['chartRolling'] = new Chart(document.getElementById('chartRolling'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      ...chartOpts(''),
+      scales: {
+        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+        y: { title: { display: true, text: metricLabels[metric], color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+}
+
+document.getElementById('rollWindow').addEventListener('change', () => { if (STATE.activeDataset) renderRolling(getFilteredDataset()); });
+document.getElementById('rollMetric').addEventListener('change', () => { if (STATE.activeDataset) renderRolling(getFilteredDataset()); });
+
+// ============================================================
+// STATISTICS TAB
+// ============================================================
+function renderStats(d) {
+  const cols = Object.keys(d.columns);
+  const n = d.dates.length;
+  const years = (d.dates[n-1] - d.dates[0]) / (365.25 * 86400000);
+
+  let html = '<table><tr><th>Statistique</th>';
+  cols.forEach(c => html += `<th>${c}</th>`);
+  html += '</tr>';
+
+  const statsRows = [
+    ['Période', () => fmtDate(d.dates[0]) + ' → ' + fmtDate(d.dates[n-1])],
+    ['Observations', () => n],
+    ['Performance cumulée', c => { const p = d.columns[c]; return fmtPct((p[p.length-1]/p[0]-1)*100); }],
+    ['Performance annualisée', c => { const p = d.columns[c]; return fmtPct(annualize(p[p.length-1]/p[0]-1, n-1)*100); }],
+    ['Volatilité annualisée', c => { const r = computeReturns(d.columns[c]); return fmtPct(stdev(r)*Math.sqrt(252)*100); }],
+    ['Sharpe Ratio', c => { const p = d.columns[c]; const r = computeReturns(p); const ann = annualize(p[p.length-1]/p[0]-1,n-1); const vol = stdev(r)*Math.sqrt(252); return vol>0?(ann/vol).toFixed(3):'—'; }],
+    ['Sortino Ratio', c => { const p = d.columns[c]; const r = computeReturns(p); const ann = annualize(p[p.length-1]/p[0]-1,n-1); const downR = r.filter(v=>v<0); const downVol = downR.length>0?stdev(downR)*Math.sqrt(252):0; return downVol>0?(ann/downVol).toFixed(3):'—'; }],
+    ['Max Drawdown', c => fmtPct(maxDrawdown(d.columns[c])*100)],
+    ['Calmar Ratio', c => { const p = d.columns[c]; const ann = annualize(p[p.length-1]/p[0]-1,n-1); const mdd = Math.abs(maxDrawdown(p)); return mdd>0?(ann/mdd).toFixed(3):'—'; }],
+    ['Rendement moyen quotidien', c => { const r = computeReturns(d.columns[c]); return fmtPct(mean(r)*100,4); }],
+    ['Vol quotidienne', c => { const r = computeReturns(d.columns[c]); return fmtPct(stdev(r)*100,4); }],
+    ['Skewness', c => skewness(computeReturns(d.columns[c])).toFixed(4)],
+    ['Kurtosis (exc.)', c => kurtosis(computeReturns(d.columns[c])).toFixed(4)],
+    ['Meilleur jour', c => { const r = computeReturns(d.columns[c]); return fmtPct(Math.max(...r)*100,3); }],
+    ['Pire jour', c => { const r = computeReturns(d.columns[c]); return fmtPct(Math.min(...r)*100,3); }],
+    ['% Jours positifs', c => { const r = computeReturns(d.columns[c]); return (r.filter(v=>v>=0).length/r.length*100).toFixed(1)+'%'; }],
+    ['VaR 95% (1j)', c => { const r = computeReturns(d.columns[c]).map(v=>v*100); return fmtPct(percentile(r, 5),3); }],
+    ['CVaR 95% (1j)', c => { const r = computeReturns(d.columns[c]).map(v=>v*100); const thresh = percentile(r,5); const tail = r.filter(v=>v<=thresh); return fmtPct(mean(tail),3); }],
+  ];
+
+  statsRows.forEach(([label, fn]) => {
+    html += `<tr><td style="font-weight:500;color:var(--text-primary)">${label}</td>`;
+    cols.forEach(c => {
+      const val = typeof fn === 'function' ? (fn.length === 0 ? fn() : fn(c)) : fn;
+      const numVal = parseFloat(String(val).replace(/[+%]/g,''));
+      html += `<td class="${!isNaN(numVal) && String(val).includes('%') ? pctClass(numVal) : ''}">${val}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</table>';
+  document.getElementById('tableDescStats').innerHTML = html;
+
+  // Drawdown chart
+  destroyChart('chartDrawdown');
+  const ddDatasets = cols.map((c, i) => ({
+    label: c,
+    data: drawdownSeries(d.columns[c]).map(v => v * 100),
+    borderColor: COLORS[i % COLORS.length],
+    backgroundColor: i === 0 ? COLORS[0] + '15' : 'transparent',
+    fill: i === 0,
+    borderWidth: 1.3, pointRadius: 0, tension: 0.1
+  }));
+  STATE.charts['chartDrawdown'] = new Chart(document.getElementById('chartDrawdown'), {
+    type: 'line',
+    data: { labels: d.dates.map(fmtDate), datasets: ddDatasets },
+    options: {
+      ...chartOpts(''),
+      scales: {
+        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+        y: { title: { display: true, text: 'Drawdown (%)', color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+}
+
+// ============================================================
+// CORRELATIONS & BETAS TAB
+// ============================================================
+function renderCorrelations(d) {
+  const win = parseInt(document.getElementById('correlWindow').value);
+  const cols = Object.keys(d.columns);
+  const n = d.dates.length;
+
+  // Compute returns
+  const allRets = {};
+  cols.forEach(c => allRets[c] = computeReturns(d.columns[c]));
+
+  // Slice for window
+  const rets = {};
+  cols.forEach(c => {
+    if (win > 0 && allRets[c].length > win) {
+      rets[c] = allRets[c].slice(-win);
+    } else {
+      rets[c] = allRets[c];
+    }
+  });
+
+  // Correlation matrix
+  let html = '<table class="matrix-table"><tr><th></th>';
+  cols.forEach(c => html += `<th>${c.replace(/\(EUR\)|\(USD\)/g,'').trim().substring(0,20)}</th>`);
+  html += '</tr>';
+  cols.forEach((c1, i) => {
+    html += `<tr><td style="font-weight:500;text-align:left">${c1.replace(/\(EUR\)|\(USD\)/g,'').trim().substring(0,20)}</td>`;
+    cols.forEach((c2, j) => {
+      const corr = correlation(rets[c1], rets[c2]);
+      const isDiag = i === j;
+      html += `<td class="${isDiag?'diag':''}" style="background:${correlColor(corr)};color:#fff">${corr.toFixed(3)}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</table>';
+  document.getElementById('correlMatrix').innerHTML = html;
+
+  // Beta matrix
+  let bHtml = '<table class="matrix-table"><tr><th>Y \\ X</th>';
+  cols.forEach(c => bHtml += `<th>${c.replace(/\(EUR\)|\(USD\)/g,'').trim().substring(0,20)}</th>`);
+  bHtml += '</tr>';
+  cols.forEach((c1, i) => {
+    bHtml += `<tr><td style="font-weight:500;text-align:left">${c1.replace(/\(EUR\)|\(USD\)/g,'').trim().substring(0,20)}</td>`;
+    cols.forEach((c2, j) => {
+      const b = beta(rets[c1], rets[c2]);
+      const isDiag = i === j;
+      bHtml += `<td class="${isDiag?'diag':''}">${b.toFixed(3)}</td>`;
+    });
+    bHtml += '</tr>';
+  });
+  bHtml += '</table>';
+  document.getElementById('betaMatrix').innerHTML = bHtml;
+
+  // Rolling correlation chart vs first index
+  destroyChart('chartRollingCorrel');
+  const refCol = cols[0];
+  const refRets = allRets[refCol];
+  const rollingWin = 252;
+  const rcDatasets = cols.slice(1).map((c, ci) => {
+    const otherRets = allRets[c];
+    const values = [];
+    const minLen = Math.min(refRets.length, otherRets.length);
+    for (let i = rollingWin; i < minLen; i++) {
+      const sliceRef = refRets.slice(i - rollingWin, i);
+      const sliceOther = otherRets.slice(i - rollingWin, i);
+      values.push(correlation(sliceRef, sliceOther));
+    }
+    return {
+      label: c, data: values,
+      borderColor: COLORS[(ci + 1) % COLORS.length],
+      backgroundColor: 'transparent',
+      borderWidth: 1.3, pointRadius: 0, tension: 0.1
+    };
+  });
+  const rcLabels = [];
+  for (let i = rollingWin; i < Math.min(refRets.length, allRets[cols[1]]?.length || refRets.length); i++) {
+    rcLabels.push(fmtDate(d.dates[i + 1]));
+  }
+  STATE.charts['chartRollingCorrel'] = new Chart(document.getElementById('chartRollingCorrel'), {
+    type: 'line',
+    data: { labels: rcLabels, datasets: rcDatasets },
+    options: {
+      ...chartOpts(''),
+      scales: {
+        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+        y: { min: -1, max: 1, title: { display: true, text: 'Corrélation vs ' + refCol.substring(0,25), color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+}
+
+function correlColor(v) {
+  // -1 (red) -> 0 (gray) -> 1 (green)
+  if (v >= 0) {
+    const t = v;
+    return `rgb(${Math.round(30*(1-t))},${Math.round(80+140*t)},${Math.round(60+94*t)})`;
+  } else {
+    const t = -v;
+    return `rgb(${Math.round(80+175*t)},${Math.round(60*(1-t))},${Math.round(60*(1-t))})`;
+  }
+}
+
+document.getElementById('correlWindow').addEventListener('change', () => { if (STATE.activeDataset) renderCorrelations(getFilteredDataset()); });
+
+// ============================================================
+// RANKING TAB
+// ============================================================
+function renderRanking(d) {
+  const win = parseInt(document.getElementById('rankWindow').value);
+  const cols = Object.keys(d.columns);
+  const n = d.dates.length;
+
+  // Compute rolling returns and rank
+  const allValues = {};
+  cols.forEach(c => {
+    allValues[c] = [];
+    const prices = d.columns[c];
+    for (let i = win; i < prices.length; i++) {
+      allValues[c].push(prices[i] / prices[i - win] - 1);
+    }
+  });
+
+  const nPeriods = allValues[cols[0]].length;
+  const rankings = {};
+  cols.forEach(c => rankings[c] = []);
+
+  for (let i = 0; i < nPeriods; i++) {
+    const vals = cols.map(c => ({ col: c, val: allValues[c][i] }));
+    vals.sort((a, b) => b.val - a.val);
+    vals.forEach((v, rank) => rankings[v.col].push(rank + 1));
+  }
+
+  // Chart
+  destroyChart('chartRanking');
+  const labels = [];
+  for (let i = win; i < d.dates.length; i++) labels.push(fmtDate(d.dates[i]));
+
+  const datasets = cols.map((c, ci) => ({
+    label: c, data: rankings[c],
+    borderColor: COLORS[ci % COLORS.length],
+    backgroundColor: 'transparent',
+    borderWidth: 1.5, pointRadius: 0, tension: 0.1, stepped: false
+  }));
+
+  STATE.charts['chartRanking'] = new Chart(document.getElementById('chartRanking'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      ...chartOpts(''),
+      scales: {
+        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+        y: { reverse: true, min: 1, max: cols.length, title: { display: true, text: 'Rang', color: '#8b92a5', font: { size: 11 } },
+          ticks: { stepSize: 1, color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+
+  // Rank frequency table
+  let html = '<table><tr><th>Indice</th>';
+  for (let r = 1; r <= cols.length; r++) html += `<th>Rang ${r}</th>`;
+  html += '<th>Rang moyen</th></tr>';
+  cols.forEach((c, ci) => {
+    html += `<tr><td style="font-weight:500;color:var(--text-primary)">${c}</td>`;
+    for (let r = 1; r <= cols.length; r++) {
+      const count = rankings[c].filter(v => v === r).length;
+      const pct = (count / rankings[c].length * 100).toFixed(1);
+      html += `<td>${pct}%</td>`;
+    }
+    const avgRank = mean(rankings[c]).toFixed(2);
+    html += `<td style="font-weight:700">${avgRank}</td></tr>`;
+  });
+  html += '</table>';
+  document.getElementById('rankFreqTable').innerHTML = html;
+}
+
+document.getElementById('rankWindow').addEventListener('change', () => { if (STATE.activeDataset) renderRanking(getFilteredDataset()); });
+
+</script>
+</body>
+</html>

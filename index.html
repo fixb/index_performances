@@ -224,6 +224,52 @@ tr:hover td { background: rgba(77,142,255,0.03); }
 .rank-1 { color: var(--accent-green); font-weight: 700; }
 .rank-last { color: var(--accent-red); }
 
+/* Ranking matrix */
+.rank-cell {
+  padding: 12px 14px;
+  vertical-align: middle;
+  min-width: 180px;
+}
+.rank-median {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.rank-range {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.rank-pos {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.rank-bar {
+  position: relative;
+  height: 6px;
+  background: #1a1f2b;
+  border-radius: 3px;
+  margin-top: 8px;
+  overflow: visible;
+}
+.rank-bar-segment {
+  position: absolute;
+  top: 0; bottom: 0;
+  border-radius: 3px;
+  opacity: 0.55;
+}
+.rank-bar-median {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  width: 2px;
+  background: var(--text-primary);
+  border-radius: 1px;
+}
+
 /* Controls */
 .controls {
   display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
@@ -669,23 +715,9 @@ label.ctrl-label {
   <!-- RANKING TAB -->
   <div class="tab-content" id="tab-ranking">
     <div class="file-selector" id="rankFileSelector"></div>
-    <div class="controls">
-      <label class="ctrl-label">Fenêtre mobile:</label>
-      <select id="rankWindow">
-        <option value="21">1 Mois</option>
-        <option value="63">3 Mois</option>
-        <option value="126">6 Mois</option>
-        <option value="252" selected>1 An</option>
-        <option value="756">3 Ans</option>
-      </select>
-    </div>
     <div class="card">
       <div class="card-title"><div class="dot"></div>Rankings glissants</div>
-      <div class="chart-container tall"><canvas id="chartRanking"></canvas></div>
-    </div>
-    <div class="card">
-      <div class="card-title"><div class="dot"></div>Fréquence des rankings (%)</div>
-      <div class="table-wrap" id="rankFreqTable"></div>
+      <div class="table-wrap" id="rankMatrix"></div>
     </div>
   </div>
 
@@ -705,7 +737,11 @@ const STATE = {
 const COLORS = ['#4d8eff','#00e19a','#ff4d6a','#ffb84d','#a855f7','#22d3ee','#f472b6','#84cc16',
                 '#fb923c','#38bdf8','#e879f9','#34d399','#fbbf24','#f87171','#818cf8'];
 
-const ESSENTIAL_PATTERNS = [/global\s*index/i, /global\s*focus/i, /global\s*parity/i];
+const ESSENTIAL_PATTERNS = [
+  /^global\s*\(/i,
+  /global\s*focus\s*hedged/i,
+  /global\s*focus\s*parity/i,
+];
 
 function essentialCols(allCols) {
   const matched = [];
@@ -1852,74 +1888,87 @@ document.getElementById('correlWindow').addEventListener('change', () => { if (S
 // RANKING TAB
 // ============================================================
 function renderRanking(d) {
-  const win = parseInt(document.getElementById('rankWindow').value);
-  const cols = Object.keys(d.columns);
-  const n = d.dates.length;
+  const cols = essentialCols(Object.keys(d.columns));
+  const horizons = [
+    { label: '1M', win: 21 },
+    { label: '3M', win: 63 },
+    { label: '6M', win: 126 },
+    { label: '1A', win: 252 },
+    { label: '3A', win: 756 },
+    { label: '5A', win: 1260 },
+  ];
 
-  // Compute rolling returns and rank
-  const allValues = {};
-  cols.forEach(c => {
-    allValues[c] = [];
-    const prices = d.columns[c];
-    for (let i = win; i < prices.length; i++) {
-      allValues[c].push(prices[i] / prices[i - win] - 1);
-    }
-  });
+  const fmtPct = v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
+  const colorFor = v => {
+    const t = Math.min(Math.abs(v) / 0.20, 1);
+    const o = 0.45 + t * 0.55;
+    return v >= 0 ? `rgba(0,225,154,${o})` : `rgba(255,77,106,${o})`;
+  };
 
-  const nPeriods = allValues[cols[0]].length;
-  const rankings = {};
-  cols.forEach(c => rankings[c] = []);
-
-  for (let i = 0; i < nPeriods; i++) {
-    const vals = cols.map(c => ({ col: c, val: allValues[c][i] }));
-    vals.sort((a, b) => b.val - a.val);
-    vals.forEach((v, rank) => rankings[v.col].push(rank + 1));
-  }
-
-  // Chart
-  destroyChart('chartRanking');
-  const labels = [];
-  for (let i = win; i < d.dates.length; i++) labels.push(fmtDate(d.dates[i]));
-
-  const datasets = cols.map((c, ci) => ({
-    label: c, data: rankings[c],
-    borderColor: COLORS[ci % COLORS.length],
-    backgroundColor: 'transparent',
-    borderWidth: 1.5, pointRadius: 0, tension: 0.1, stepped: false
-  }));
-
-  STATE.charts['chartRanking'] = new Chart(document.getElementById('chartRanking'), {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      ...chartOpts(''),
-      scales: {
-        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
-        y: { reverse: true, min: 1, max: cols.length, title: { display: true, text: 'Rang', color: '#8b92a5', font: { size: 11 } },
-          ticks: { stepSize: 1, color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+  const rows = horizons.map(h => {
+    const cells = {};
+    for (const c of cols) {
+      const prices = d.columns[c];
+      const n = prices.length;
+      if (n <= h.win) { cells[c] = null; continue; }
+      const rets = [];
+      for (let i = h.win; i < n; i++) {
+        const r = prices[i] / prices[i - h.win] - 1;
+        rets.push(h.win >= 252 ? annualize(r, h.win) : r);
       }
+      cells[c] = {
+        med: percentile(rets, 50),
+        p5: percentile(rets, 5),
+        p95: percentile(rets, 95),
+        posPct: rets.filter(v => v > 0).length / rets.length * 100,
+        n: rets.length,
+      };
     }
+    let maxAbs = 0;
+    for (const c of cols) {
+      const cell = cells[c];
+      if (!cell) continue;
+      maxAbs = Math.max(maxAbs, Math.abs(cell.p5), Math.abs(cell.p95));
+    }
+    return { h, cells, maxAbs: maxAbs || 1 };
   });
 
-  // Rank frequency table
-  let html = '<table><tr><th>Indice</th>';
-  for (let r = 1; r <= cols.length; r++) html += `<th>Rang ${r}</th>`;
-  html += '<th>Rang moyen</th></tr>';
-  cols.forEach((c, ci) => {
-    html += `<tr><td style="font-weight:500;color:var(--text-primary)">${c}</td>`;
-    for (let r = 1; r <= cols.length; r++) {
-      const count = rankings[c].filter(v => v === r).length;
-      const pct = (count / rankings[c].length * 100).toFixed(1);
-      html += `<td>${pct}%</td>`;
+  let html = '<table><tr><th>Horizon</th>';
+  cols.forEach(c => html += `<th>${c}</th>`);
+  html += '</tr>';
+  for (const row of rows) {
+    const metric = row.h.win >= 252 ? 'annualisé' : 'cumulé';
+    html += `<tr><td style="font-weight:600;color:var(--text-primary)">
+      ${row.h.label}<div style="font-size:10px;color:var(--text-muted);font-weight:400;text-transform:uppercase;letter-spacing:0.3px">${metric}</div>
+    </td>`;
+    for (const c of cols) {
+      const cell = row.cells[c];
+      if (!cell) {
+        html += '<td class="rank-cell" style="color:var(--text-muted);font-size:12px">—</td>';
+        continue;
+      }
+      const M = row.maxAbs;
+      const toPct = v => Math.max(0, Math.min(100, ((v + M) / (2 * M)) * 100));
+      const segLeft = toPct(cell.p5);
+      const segRight = toPct(cell.p95);
+      const segWidth = Math.max(segRight - segLeft, 1);
+      const medLeft = toPct(cell.med);
+      const segColor = cell.med >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+      html += `<td class="rank-cell">
+        <div class="rank-median" style="color:${colorFor(cell.med)}">${fmtPct(cell.med)}</div>
+        <div class="rank-range">[${fmtPct(cell.p5)} ; ${fmtPct(cell.p95)}]</div>
+        <div class="rank-pos">${cell.posPct.toFixed(0)}% positifs · ${cell.n} fenêtres</div>
+        <div class="rank-bar">
+          <div class="rank-bar-segment" style="left:${segLeft}%;width:${segWidth}%;background:${segColor}"></div>
+          <div class="rank-bar-median" style="left:${medLeft}%"></div>
+        </div>
+      </td>`;
     }
-    const avgRank = mean(rankings[c]).toFixed(2);
-    html += `<td style="font-weight:700">${avgRank}</td></tr>`;
-  });
+    html += '</tr>';
+  }
   html += '</table>';
-  document.getElementById('rankFreqTable').innerHTML = html;
+  document.getElementById('rankMatrix').innerHTML = html;
 }
-
-document.getElementById('rankWindow').addEventListener('change', () => { if (STATE.activeDataset) renderRanking(getFilteredDataset()); });
 
 </script>
 </body>

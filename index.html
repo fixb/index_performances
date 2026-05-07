@@ -705,19 +705,31 @@ const STATE = {
 const COLORS = ['#4d8eff','#00e19a','#ff4d6a','#ffb84d','#a855f7','#22d3ee','#f472b6','#84cc16',
                 '#fb923c','#38bdf8','#e879f9','#34d399','#fbbf24','#f87171','#818cf8'];
 
+const ESSENTIAL_PATTERNS = [/global\s*index/i, /global\s*focus/i, /global\s*parity/i];
+
+function essentialCols(allCols) {
+  const matched = [];
+  for (const pat of ESSENTIAL_PATTERNS) {
+    for (const c of allCols) {
+      if (pat.test(c) && !matched.includes(c)) matched.push(c);
+    }
+  }
+  return matched.length ? matched : allCols;
+}
+
 // Get the active dataset sliced to selected date range
 function getFilteredDataset() {
   if (!STATE.activeDataset) return null;
   const src = STATE.datasets[STATE.activeDataset];
   const s = STATE.dateRange.startIdx || 0;
   const e = (STATE.dateRange.endIdx != null ? STATE.dateRange.endIdx : src.dates.length - 1) + 1;
-  if (s === 0 && e === src.dates.length) return src;
+  const cols = essentialCols(Object.keys(src.columns));
   const filtered = {
     dates: src.dates.slice(s, e),
     columns: {},
     name: src.name
   };
-  for (const c of Object.keys(src.columns)) {
+  for (const c of cols) {
     filtered.columns[c] = src.columns[c].slice(s, e);
   }
   return filtered;
@@ -842,7 +854,7 @@ function updateUI() {
   fileList.innerHTML = Object.keys(STATE.datasets).map(name => {
     const d = STATE.datasets[name];
     const n = d.dates.length;
-    const cols = Object.keys(d.columns).length;
+    const cols = essentialCols(Object.keys(d.columns)).length;
     return `<div class="file-tag"><span class="check">✓</span>${name} (${cols} indices, ${n} obs)</div>`;
   }).join('');
 
@@ -896,7 +908,7 @@ function renderSummary() {
   const el = document.getElementById('dataSummary');
   let html = '';
   for (const [name, d] of Object.entries(STATE.datasets)) {
-    const cols = Object.keys(d.columns);
+    const cols = essentialCols(Object.keys(d.columns));
     const startDate = fmtDate(d.dates[0]);
     const endDate = fmtDate(d.dates[d.dates.length-1]);
     html += `<div class="card"><div class="card-title"><div class="dot"></div>${shortName(name)}</div>
@@ -920,7 +932,7 @@ function populateIndexSelectors() {
   ['calIndex','distIndex'].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel || !STATE.activeDataset) return;
-    const cols = Object.keys(STATE.datasets[STATE.activeDataset].columns);
+    const cols = essentialCols(Object.keys(STATE.datasets[STATE.activeDataset].columns));
     const prev = sel.value;
     sel.innerHTML = cols.map((c,i) => `<option value="${c}">${c}</option>`).join('');
     // Restore previous selection if it still exists

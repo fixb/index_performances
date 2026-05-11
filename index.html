@@ -2,7 +2,9 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>LSEG Convertible Bond Indices — Analytics Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -54,8 +56,12 @@ body {
   backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border);
   padding: 0 32px;
-  height: 56px;
+  padding-left: max(32px, env(safe-area-inset-left));
+  padding-right: max(32px, env(safe-area-inset-right));
+  padding-top: env(safe-area-inset-top);
+  height: calc(56px + env(safe-area-inset-top));
   display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
 }
 .header-brand {
   display: flex; align-items: center; gap: 12px;
@@ -70,6 +76,9 @@ body {
   font-size: 15px; font-weight: 600;
   letter-spacing: -0.3px;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .header-brand span {
   font-size: 11px; font-weight: 400;
@@ -79,11 +88,13 @@ body {
   background: var(--bg-tertiary);
   border-radius: 4px;
   font-family: var(--font-mono);
+  flex-shrink: 0;
 }
 .header-status {
   display: flex; align-items: center; gap: 16px;
   font-size: 12px; color: var(--text-muted);
   font-family: var(--font-mono);
+  flex-shrink: 0;
 }
 .status-dot {
   width: 7px; height: 7px;
@@ -99,9 +110,14 @@ body {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   padding: 0 32px;
+  padding-left: max(32px, env(safe-area-inset-left));
+  padding-right: max(32px, env(safe-area-inset-right));
   gap: 0;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.tab-nav::-webkit-scrollbar { display: none; }
 .tab-btn {
   padding: 12px 20px;
   background: none; border: none;
@@ -124,7 +140,13 @@ body {
 }
 
 /* Main Content */
-.main { padding: 24px 32px; max-width: 1600px; margin: 0 auto; }
+.main {
+  padding: 24px 32px;
+  padding-left: max(32px, env(safe-area-inset-left));
+  padding-right: max(32px, env(safe-area-inset-right));
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+  max-width: 1600px; margin: 0 auto;
+}
 .tab-content { display: none; }
 .tab-content.active { display: block; animation: fadeIn 0.25s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -367,14 +389,60 @@ label.ctrl-label {
 @media (max-width: 900px) {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .grid-4 { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-  .main { padding: 16px; }
-  .header { padding: 0 16px; }
-  .tab-nav { padding: 0 16px; }
+  .main {
+    padding: 16px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+  .header {
+    padding: 0 16px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+  .tab-nav {
+    padding: 0 16px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+  .date-bar {
+    padding: 10px 16px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
   .chart-container, .chart-container.tall { height: 300px; }
+  .upload-zone { padding: 32px 16px; }
+  .card { padding: 16px; }
 }
 @media (max-width: 600px) {
   .grid-4 { grid-template-columns: 1fr 1fr; }
   .kpi-value { font-size: 16px; }
+  .header-brand h1 { font-size: 13px; }
+  .header-brand span { display: none; }
+  .header-status { font-size: 11px; gap: 8px; }
+  .tab-btn { padding: 12px 14px; font-size: 12px; }
+  .upload-zone { padding: 28px 14px; }
+  .upload-zone h3 { font-size: 14px; }
+  .upload-zone p { font-size: 12px; }
+  .card { padding: 14px; border-radius: 10px; }
+  .card-title { font-size: 12px; margin-bottom: 12px; }
+  table { font-size: 11px; }
+  th { padding: 8px 10px; font-size: 10px; }
+  td { padding: 7px 10px; }
+  .controls { gap: 8px; }
+  select, button.ctrl-btn { padding: 8px 12px; font-size: 12px; min-height: 36px; }
+}
+/* Larger touch targets on touch devices */
+@media (pointer: coarse) {
+  .date-slider-wrap input[type="range"]::-webkit-slider-thumb {
+    width: 22px; height: 22px;
+  }
+  .date-slider-wrap input[type="range"]::-moz-range-thumb {
+    width: 22px; height: 22px;
+  }
+  .date-slider-wrap { height: 36px; }
+  .date-slider-wrap input[type="range"] { height: 36px; }
+  .tab-btn { padding: 14px 18px; }
+  button.ctrl-btn, select { min-height: 36px; }
 }
 
 /* Tooltip for charts */
@@ -403,6 +471,8 @@ label.ctrl-label {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   padding: 10px 32px;
+  padding-left: max(32px, env(safe-area-inset-left));
+  padding-right: max(32px, env(safe-area-inset-right));
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
@@ -942,24 +1012,172 @@ function shortName(n) {
 
 function renderSummary() {
   const el = document.getElementById('dataSummary');
-  let html = '';
+
+  // Build the universe: unique column names across all loaded datasets
+  const universe = []; // { dataset, col }
+  const seenCols = new Set();
   for (const [name, d] of Object.entries(STATE.datasets)) {
-    const cols = essentialCols(Object.keys(d.columns));
-    const startDate = fmtDate(d.dates[0]);
-    const endDate = fmtDate(d.dates[d.dates.length-1]);
-    html += `<div class="card"><div class="card-title"><div class="dot"></div>${shortName(name)}</div>
-      <div class="grid-4">${cols.map(c => {
-        const vals = d.columns[c];
-        const ret = ((vals[vals.length-1]/vals[0])-1)*100;
-        return `<div class="kpi-box">
-          <div class="kpi-label">${c}</div>
-          <div class="kpi-value ${ret>=0?'pos':'neg'}">${ret>=0?'+':''}${ret.toFixed(1)}%</div>
-        </div>`;
-      }).join('')}</div>
-      <p style="margin-top:12px;font-size:12px;color:var(--text-muted);">${startDate} → ${endDate} · ${d.dates.length} observations</p>
-    </div>`;
+    Object.keys(d.columns).forEach(c => {
+      if (!seenCols.has(c)) { universe.push({ dataset: name, col: c }); seenCols.add(c); }
+    });
   }
-  el.innerHTML = html;
+
+  // Initialize the displayed list with the essential indices on first render
+  if (!STATE.summaryIndices) {
+    STATE.summaryIndices = [];
+    for (const pat of ESSENTIAL_PATTERNS) {
+      for (const u of universe) {
+        if (pat.test(u.col) && !STATE.summaryIndices.includes(u.col)) {
+          STATE.summaryIndices.push(u.col);
+        }
+      }
+    }
+  }
+  // Drop indices whose source file is no longer loaded
+  STATE.summaryIndices = STATE.summaryIndices.filter(c => seenCols.has(c));
+
+  if (universe.length === 0) { el.innerHTML = ''; return; }
+
+  const datasetFor = (col) => universe.find(u => u.col === col)?.dataset;
+
+  const findDateIdx = (dates, target) => {
+    for (let i = dates.length - 1; i >= 0; i--) if (dates[i] <= target) return i;
+    return 0;
+  };
+
+  const periodCols = [
+    { label: 'Last daily',    key: '1D'  },
+    { label: 'WTD',           key: 'WTD' },
+    { label: 'MTD',           key: 'MTD' },
+    { label: 'QTD',           key: 'QTD' },
+    { label: 'YTD',           key: 'YTD' },
+    { label: '12M',           key: '12M' },
+    { label: 'Vol 1Y (ann.)', key: 'VOL' },
+  ];
+
+  // Build the unified table
+  let table = '<table><tr><th>Indice</th>';
+  periodCols.forEach(p => { table += `<th>${p.label}</th>`; });
+  table += '<th></th></tr>';
+
+  STATE.summaryIndices.forEach(col => {
+    const dsName = datasetFor(col);
+    const d = STATE.datasets[dsName];
+    const prices = d.columns[col];
+    const lastIdx = d.dates.length - 1;
+    const lastDate = d.dates[lastIdx];
+
+    const wtdRef = new Date(lastDate);
+    const dow = wtdRef.getDay() || 7;
+    wtdRef.setDate(wtdRef.getDate() - dow); wtdRef.setHours(0,0,0,0);
+    const mtdRef = new Date(lastDate.getFullYear(), lastDate.getMonth(), 0);
+    const qMonth = Math.floor(lastDate.getMonth() / 3) * 3;
+    const qtdRef = new Date(lastDate.getFullYear(), qMonth, 0);
+    const ytdRef = new Date(lastDate.getFullYear() - 1, 11, 31);
+
+    const refIdx = {
+      '1D':  Math.max(0, lastIdx - 1),
+      'WTD': findDateIdx(d.dates, wtdRef),
+      'MTD': findDateIdx(d.dates, mtdRef),
+      'QTD': findDateIdx(d.dates, qtdRef),
+      'YTD': findDateIdx(d.dates, ytdRef),
+      '12M': Math.max(0, lastIdx - 252),
+    };
+
+    table += `<tr><td style="color:var(--text-primary);font-weight:500">${col}</td>`;
+    periodCols.forEach(p => {
+      if (p.key === 'VOL') {
+        const startVol = Math.max(0, lastIdx - 252);
+        const slice = prices.slice(startVol, lastIdx + 1);
+        if (slice.length < 3) { table += '<td>—</td>'; return; }
+        const rets = computeReturns(slice);
+        const vol = stdev(rets) * Math.sqrt(252) * 100;
+        const tip = `Vol annualisée sur ${rets.length} rendements (${fmtDate(d.dates[startVol])} → ${fmtDate(d.dates[lastIdx])})`;
+        table += `<td title="${tip}">${vol.toFixed(2)}%</td>`;
+      } else {
+        const sIdx = refIdx[p.key];
+        const nDays = lastIdx - sIdx;
+        if (nDays <= 0) { table += '<td>—</td>'; return; }
+        const ret = (prices[lastIdx] / prices[sIdx] - 1) * 100;
+        const tip = `${fmtDate(d.dates[sIdx])} → ${fmtDate(d.dates[lastIdx])} (${nDays} jour${nDays>1?'s':''} ouvrés)`;
+        table += `<td class="${pctClass(ret)}" title="${tip}">${fmtPct(ret)}</td>`;
+      }
+    });
+    table += `<td><button class="ctrl-btn" data-remove-index="${col.replace(/"/g,'&quot;')}" aria-label="Retirer ${col.replace(/"/g,'&quot;')}" style="padding:6px 12px;font-size:14px;line-height:1;min-width:32px;min-height:32px;">×</button></td>`;
+    table += '</tr>';
+  });
+  table += '</table>';
+
+  // Dropdown of available indices not yet in the table
+  const available = universe.filter(u => !STATE.summaryIndices.includes(u.col));
+  const dropdown = `
+    <div class="controls" style="margin-bottom:12px;">
+      <label class="ctrl-label">Ajouter un indice :</label>
+      <select id="summaryAddIndex" ${available.length === 0 ? 'disabled' : ''}>
+        <option value="">— Sélectionner —</option>
+        ${available.map(u => `<option value="${u.col.replace(/"/g,'&quot;')}">${u.col}</option>`).join('')}
+      </select>
+    </div>`;
+
+  // Footer: per file used in the table, show the reference date for each period
+  const usedDatasets = [...new Set(STATE.summaryIndices.map(c => datasetFor(c)))];
+  const footer = usedDatasets.map(name => {
+    const d = STATE.datasets[name];
+    const lastIdx = d.dates.length - 1;
+    const lastDate = d.dates[lastIdx];
+
+    const wtdRef = new Date(lastDate);
+    const dow = wtdRef.getDay() || 7;
+    wtdRef.setDate(wtdRef.getDate() - dow); wtdRef.setHours(0,0,0,0);
+    const mtdRef = new Date(lastDate.getFullYear(), lastDate.getMonth(), 0);
+    const qMonth = Math.floor(lastDate.getMonth() / 3) * 3;
+    const qtdRef = new Date(lastDate.getFullYear(), qMonth, 0);
+    const ytdRef = new Date(lastDate.getFullYear() - 1, 11, 31);
+
+    const refIdx = {
+      '1D':  Math.max(0, lastIdx - 1),
+      'WTD': findDateIdx(d.dates, wtdRef),
+      'MTD': findDateIdx(d.dates, mtdRef),
+      'QTD': findDateIdx(d.dates, qtdRef),
+      'YTD': findDateIdx(d.dates, ytdRef),
+      '12M': Math.max(0, lastIdx - 252),
+      'VOL': Math.max(0, lastIdx - 252),
+    };
+    const labels = {
+      '1D':'Last daily', 'WTD':'WTD', 'MTD':'MTD', 'QTD':'QTD',
+      'YTD':'YTD', '12M':'12M', 'VOL':'Vol 1Y depuis'
+    };
+    const refs = Object.keys(labels).map(k => `${labels[k]}: ${fmtDate(d.dates[refIdx[k]])}`).join(' · ');
+
+    return `<div><strong style="color:var(--text-secondary)">${shortName(name)}</strong> — `
+      + `dernière obs : ${fmtDate(lastDate)} (${d.dates.length} obs depuis ${fmtDate(d.dates[0])})<br>`
+      + `<span style="opacity:0.85">Dates de référence → ${refs}</span></div>`;
+  }).join('<div style="height:6px"></div>');
+
+  el.innerHTML = `<div class="card">
+    <div class="card-title"><div class="dot"></div>Synthèse des indices</div>
+    ${dropdown}
+    <div class="table-wrap">${table}</div>
+    <p style="margin-top:12px;font-size:12px;color:var(--text-muted);">${footer}</p>
+  </div>`;
+
+  // Wire up dropdown + remove buttons
+  const sel = document.getElementById('summaryAddIndex');
+  if (sel) sel.addEventListener('change', (e) => {
+    const v = e.target.value;
+    if (v && !STATE.summaryIndices.includes(v)) {
+      STATE.summaryIndices.push(v);
+      renderSummary();
+    }
+  });
+  el.querySelectorAll('[data-remove-index]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const col = btn.getAttribute('data-remove-index');
+      STATE.summaryIndices = STATE.summaryIndices.filter(c => c !== col);
+      renderSummary();
+    });
+  });
+
   // populate index selectors
   populateIndexSelectors();
 }

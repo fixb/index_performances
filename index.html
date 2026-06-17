@@ -1377,16 +1377,19 @@ function renderReport() {
       { key: 'wtd',   label: 'WTD',        on: cbW.checked },
       { key: 'mtd',   label: 'MTD',        on: cbM.checked },
     ];
-    const fmtLine = (label, getVal) => {
+    const fmtLine = (label, getVal, decorate) => {
       const segs = [];
       periods.forEach(p => {
         if (!p.on) return;
         const v = getVal(p.key);
         if (v == null) return;
-        segs.push(`${fmtPct(v)} (${p.label})`);
+        const dot = decorate ? decorate(v) : '';
+        segs.push(`${dot}${fmtPct(v)} (${p.label})`);
       });
       return segs.length ? `${label} : ${segs.join(' | ')}` : null;
     };
+    // Pastille de sur/sous-performance : 🟢 surperf, 🔴 sous-perf, ⚪ à l'équilibre
+    const dot = (v) => v > 0 ? '🟢 ' : v < 0 ? '🔴 ' : '⚪ ';
 
     const lines = [];
     let asOf = null;
@@ -1413,7 +1416,7 @@ function renderReport() {
     const bench = STATE.report.a ? metrics[STATE.report.a] : null;
     if (bench) {
       const relLine = fmtLine(`Relative performance ${bgcbName} vs ${bench.col}`,
-        k => (bgcb[k] != null && bench[k] != null) ? (bgcb[k] - bench[k]) : null);
+        k => (bgcb[k] != null && bench[k] != null) ? (bgcb[k] - bench[k]) : null, dot);
       if (relLine) lines.push('', relLine);
     }
 

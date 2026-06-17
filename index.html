@@ -307,6 +307,17 @@ select, button.ctrl-btn {
   cursor: pointer;
 }
 select:focus, button.ctrl-btn:focus { outline: none; border-color: var(--accent-blue); }
+input.report-input {
+  padding: 7px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  width: 120px;
+}
+input.report-input:focus { outline: none; border-color: var(--accent-blue); }
 button.ctrl-btn:hover { background: var(--border); }
 button.ctrl-btn.active { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
 label.ctrl-label {
@@ -644,6 +655,7 @@ label.ctrl-label {
       <div class="file-list" id="fileList"></div>
     </div>
     <div id="dataSummary"></div>
+    <div id="reportText"></div>
   </div>
 
   <!-- PERFORMANCE TAB -->
@@ -976,6 +988,9 @@ function updateUI() {
   // Data summary
   renderSummary();
 
+  // Reporting text generator
+  renderReport();
+
   // Init date bar
   initDateBar();
 }
@@ -1191,6 +1206,239 @@ function populateIndexSelectors() {
     sel.innerHTML = cols.map((c,i) => `<option value="${c}">${c}</option>`).join('');
     // Restore previous selection if it still exists
     if (prev && cols.includes(prev)) sel.value = prev;
+  });
+}
+
+// ============================================================
+// REPORTING TEXT GENERATOR
+// ============================================================
+// Génère un petit texte de reporting : toujours le "last daily", + le WTD
+// le 1er jour ouvré de la semaine (lundi) et + le MTD le 1er jour ouvré du mois.
+
+// Univers de toutes les colonnes (tous fichiers confondus) → { col, dataset }
+function reportUniverse() {
+  const universe = [];
+  const seen = new Set();
+  for (const [name, d] of Object.entries(STATE.datasets)) {
+    Object.keys(d.columns).forEach(c => {
+      if (!seen.has(c)) { universe.push({ col: c, dataset: name }); seen.add(c); }
+    });
+  }
+  return universe;
+}
+
+// Première colonne satisfaisant tous les patterns "include" et aucun "exclude"
+function pickSeries(universe, include, exclude = []) {
+  const u = universe.find(u =>
+    include.every(p => p.test(u.col)) && !exclude.some(p => p.test(u.col)));
+  return u ? u.col : '';
+}
+
+// Calcule daily / WTD / MTD + drapeaux d'auto-détection pour une colonne
+function computeReportMetrics(col) {
+  const u = reportUniverse().find(x => x.col === col);
+  if (!u) return null;
+  const d = STATE.datasets[u.dataset];
+  const prices = d.columns[col];
+  const lastIdx = d.dates.length - 1;
+  if (lastIdx < 1) return null;
+  const lastDate = d.dates[lastIdx];
+  const prevDate = d.dates[lastIdx - 1];
+
+  const findDateIdx = (dates, target) => {
+    for (let i = dates.length - 1; i >= 0; i--) if (dates[i] <= target) return i;
+    return 0;
+  };
+
+  // Réf WTD : dernier jour ouvré de la semaine précédente (vendredi en général)
+  const wtdRef = new Date(lastDate);
+  const dow = wtdRef.getDay() || 7;
+  wtdRef.setDate(wtdRef.getDate() - dow); wtdRef.setHours(0, 0, 0, 0);
+  // Réf MTD : dernier jour ouvré du mois précédent
+  const mtdRef = new Date(lastDate.getFullYear(), lastDate.getMonth(), 0);
+
+  const ret = (refIdx) => {
+    if (refIdx == null || lastIdx - refIdx <= 0) return null;
+    return (prices[lastIdx] / prices[refIdx] - 1) * 100;
+  };
+
+  // Auto-détection : 1er jour ouvré de la semaine / du mois
+  const startOfWeek = new Date(lastDate);
+  const sow = startOfWeek.getDay() || 7;
+  startOfWeek.setHours(0, 0, 0, 0);
+  startOfWeek.setDate(startOfWeek.getDate() - (sow - 1));
+  const isFirstOfWeek = prevDate < startOfWeek;
+  const isFirstOfMonth = prevDate.getMonth() !== lastDate.getMonth()
+    || prevDate.getFullYear() !== lastDate.getFullYear();
+
+  return {
+    col, lastDate,
+    daily: ret(lastIdx - 1),
+    wtd: ret(findDateIdx(d.dates, wtdRef)),
+    mtd: ret(findDateIdx(d.dates, mtdRef)),
+    isFirstOfWeek, isFirstOfMonth,
+  };
+}
+
+function renderReport() {
+  const el = document.getElementById('reportText');
+  if (!el) return;
+  const universe = reportUniverse();
+  if (!universe.length) { el.innerHTML = ''; return; }
+
+  // Sélections par défaut (mémorisées dans STATE.report)
+  STATE.report = STATE.report || {};
+  if (STATE.report.a === undefined) {
+    STATE.report.a = pickSeries(universe,
+      [/global/i, /focus/i, /hedged/i, /eur/i], [/parity/i]);
+  }
+  if (STATE.report.b === undefined) {
+    STATE.report.b = pickSeries(universe,
+      [/\bus\b/i, /focus/i, /hedged/i, /parity/i]);
+  }
+  if (STATE.report.bgcbName === undefined) STATE.report.bgcbName = 'BGCB';
+  STATE.report.bgcbDaily = STATE.report.bgcbDaily || '';
+  STATE.report.bgcbWtd = STATE.report.bgcbWtd || '';
+  STATE.report.bgcbMtd = STATE.report.bgcbMtd || '';
+
+  const opt = (sel) => universe.map(u =>
+    `<option value="${u.col.replace(/"/g, '&quot;')}"${u.col === sel ? ' selected' : ''}>${u.col}</option>`
+  ).join('');
+
+  el.innerHTML = `<div class="card">
+    <div class="card-title"><div class="dot"></div>Texte de reporting</div>
+    <div class="controls" style="flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Série 1</label>
+        <select id="reportSeriesA"><option value="">— Aucune —</option>${opt(STATE.report.a)}</select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Série 2</label>
+        <select id="reportSeriesB"><option value="">— Aucune —</option>${opt(STATE.report.b)}</select>
+      </div>
+    </div>
+    <div class="controls" style="flex-wrap:wrap;gap:12px;margin-bottom:12px;align-items:flex-end;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Fonds (saisie manuelle)</label>
+        <input type="text" class="report-input" id="bgcbName" style="width:90px;font-family:var(--font-sans);" value="${(STATE.report.bgcbName || 'BGCB').replace(/"/g,'&quot;')}">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Perf. jour %</label>
+        <input type="number" step="0.01" class="report-input" id="bgcbDaily" placeholder="ex. 0.35" value="${STATE.report.bgcbDaily}">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Perf. WTD %</label>
+        <input type="number" step="0.01" class="report-input" id="bgcbWtd" placeholder="si lundi" value="${STATE.report.bgcbWtd}">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Perf. MTD %</label>
+        <input type="number" step="0.01" class="report-input" id="bgcbMtd" placeholder="si 1er du mois" value="${STATE.report.bgcbMtd}">
+      </div>
+    </div>
+    <div class="controls" style="gap:18px;margin-bottom:12px;">
+      <label class="ctrl-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="reportWTD"> Inclure WTD</label>
+      <label class="ctrl-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="reportMTD"> Inclure MTD</label>
+      <button class="ctrl-btn" id="reportCopyBtn">Copier</button>
+    </div>
+    <pre id="reportOutput" style="white-space:pre-wrap;font-family:var(--font-mono);font-size:13px;
+      background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);
+      padding:14px;margin:0;color:var(--text-primary);"></pre>
+    <p style="margin-top:10px;font-size:12px;color:var(--text-muted);">
+      WTD coché automatiquement le 1<sup>er</sup> jour ouvré de la semaine, MTD le 1<sup>er</sup> jour ouvré du mois (décochez/cochez pour forcer).</p>
+  </div>`;
+
+  const selA = document.getElementById('reportSeriesA');
+  const selB = document.getElementById('reportSeriesB');
+  const cbW = document.getElementById('reportWTD');
+  const cbM = document.getElementById('reportMTD');
+
+  // Auto-cocher selon la dernière observation (réinitialisé si la sélection change)
+  const autoFlags = () => {
+    const ma = STATE.report.a ? computeReportMetrics(STATE.report.a) : null;
+    const mb = STATE.report.b ? computeReportMetrics(STATE.report.b) : null;
+    const m = ma || mb;
+    cbW.checked = !!(m && m.isFirstOfWeek);
+    cbM.checked = !!(m && m.isFirstOfMonth);
+  };
+  autoFlags();
+
+  const num = (s) => {
+    if (s == null || String(s).trim() === '') return null;
+    const v = parseFloat(String(s).replace(',', '.'));
+    return isNaN(v) ? null : v;
+  };
+
+  const buildText = () => {
+    // Périodes actives : daily toujours, WTD/MTD selon les cases
+    const periods = [
+      { key: 'daily', label: 'last daily', on: true },
+      { key: 'wtd',   label: 'WTD',        on: cbW.checked },
+      { key: 'mtd',   label: 'MTD',        on: cbM.checked },
+    ];
+    const fmtLine = (label, getVal) => {
+      const segs = [];
+      periods.forEach(p => {
+        if (!p.on) return;
+        const v = getVal(p.key);
+        if (v == null) return;
+        segs.push(`${fmtPct(v)} (${p.label})`);
+      });
+      return segs.length ? `${label} : ${segs.join(' | ')}` : null;
+    };
+
+    const lines = [];
+    let asOf = null;
+
+    // Ligne BGCB (saisie manuelle)
+    const bgcbName = (STATE.report.bgcbName || 'BGCB').trim() || 'BGCB';
+    const bgcb = { daily: num(STATE.report.bgcbDaily), wtd: num(STATE.report.bgcbWtd), mtd: num(STATE.report.bgcbMtd) };
+    const bgcbLine = fmtLine(bgcbName, k => bgcb[k]);
+    if (bgcbLine) lines.push(bgcbLine);
+
+    // Lignes indices
+    const metrics = {};
+    [STATE.report.a, STATE.report.b].forEach(col => {
+      if (!col) return;
+      const m = computeReportMetrics(col);
+      if (!m) return;
+      metrics[col] = m;
+      asOf = asOf || fmtDate(m.lastDate);
+      const line = fmtLine(m.col, k => m[k]);
+      if (line) lines.push(line);
+    });
+
+    // Sur/sous-performance BGCB vs Série 1 (benchmark)
+    const bench = STATE.report.a ? metrics[STATE.report.a] : null;
+    if (bench) {
+      const relLine = fmtLine(`Sur/sous-performance ${bgcbName} vs ${bench.col}`,
+        k => (bgcb[k] != null && bench[k] != null) ? (bgcb[k] - bench[k]) : null);
+      if (relLine) lines.push('', relLine);
+    }
+
+    const header = asOf ? `Performance des indices — ${asOf}`
+      : (bgcbLine ? 'Performance' : 'Aucune série sélectionnée');
+    document.getElementById('reportOutput').textContent =
+      lines.length ? `${header}\n\n${lines.join('\n')}` : header;
+  };
+  buildText();
+
+  selA.addEventListener('change', e => { STATE.report.a = e.target.value; autoFlags(); buildText(); });
+  selB.addEventListener('change', e => { STATE.report.b = e.target.value; autoFlags(); buildText(); });
+  cbW.addEventListener('change', buildText);
+  cbM.addEventListener('change', buildText);
+  document.getElementById('bgcbName').addEventListener('input', e => { STATE.report.bgcbName = e.target.value; buildText(); });
+  document.getElementById('bgcbDaily').addEventListener('input', e => { STATE.report.bgcbDaily = e.target.value; buildText(); });
+  document.getElementById('bgcbWtd').addEventListener('input', e => { STATE.report.bgcbWtd = e.target.value; buildText(); });
+  document.getElementById('bgcbMtd').addEventListener('input', e => { STATE.report.bgcbMtd = e.target.value; buildText(); });
+  document.getElementById('reportCopyBtn').addEventListener('click', () => {
+    const txt = document.getElementById('reportOutput').textContent;
+    const btn = document.getElementById('reportCopyBtn');
+    navigator.clipboard.writeText(txt).then(() => {
+      btn.textContent = 'Copié ✓';
+      setTimeout(() => { btn.textContent = 'Copier'; }, 1500);
+    }).catch(() => { btn.textContent = 'Échec'; });
   });
 }
 

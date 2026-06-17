@@ -1587,7 +1587,11 @@ dateResetBtn.addEventListener('click', () => {
 // UTILITY FUNCTIONS
 // ============================================================
 function fmtDate(d) {
-  return d.toISOString().slice(0,10);
+  // Date du calendrier local (évite le décalage d'un jour de toISOString en UTC)
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 function fmtPct(v, dec=2) {
   if (v == null || isNaN(v)) return '—';

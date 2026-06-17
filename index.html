@@ -1430,8 +1430,16 @@ function renderReport() {
   cbM.addEventListener('change', buildText);
   document.getElementById('bgcbName').addEventListener('input', e => { STATE.report.bgcbName = e.target.value; buildText(); });
   document.getElementById('bgcbDaily').addEventListener('input', e => { STATE.report.bgcbDaily = e.target.value; buildText(); });
-  document.getElementById('bgcbWtd').addEventListener('input', e => { STATE.report.bgcbWtd = e.target.value; buildText(); });
-  document.getElementById('bgcbMtd').addEventListener('input', e => { STATE.report.bgcbMtd = e.target.value; buildText(); });
+  document.getElementById('bgcbWtd').addEventListener('input', e => {
+    STATE.report.bgcbWtd = e.target.value;
+    if (num(e.target.value) != null) cbW.checked = true; // saisir une valeur active la période
+    buildText();
+  });
+  document.getElementById('bgcbMtd').addEventListener('input', e => {
+    STATE.report.bgcbMtd = e.target.value;
+    if (num(e.target.value) != null) cbM.checked = true;
+    buildText();
+  });
   document.getElementById('reportCopyBtn').addEventListener('click', () => {
     const txt = document.getElementById('reportOutput').textContent;
     const btn = document.getElementById('reportCopyBtn');

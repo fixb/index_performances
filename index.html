@@ -1409,16 +1409,16 @@ function renderReport() {
       if (line) lines.push(line);
     });
 
-    // Sur/sous-performance BGCB vs Série 1 (benchmark)
+    // Relative performance: BGCB vs Series 1 (benchmark)
     const bench = STATE.report.a ? metrics[STATE.report.a] : null;
     if (bench) {
-      const relLine = fmtLine(`Sur/sous-performance ${bgcbName} vs ${bench.col}`,
+      const relLine = fmtLine(`Relative performance ${bgcbName} vs ${bench.col}`,
         k => (bgcb[k] != null && bench[k] != null) ? (bgcb[k] - bench[k]) : null);
       if (relLine) lines.push('', relLine);
     }
 
-    const header = asOf ? `Performance des indices — ${asOf}`
-      : (bgcbLine ? 'Performance' : 'Aucune série sélectionnée');
+    const header = asOf ? `Index performance — ${asOf}`
+      : (bgcbLine ? 'Performance' : 'No series selected');
     document.getElementById('reportOutput').textContent =
       lines.length ? `${header}\n\n${lines.join('\n')}` : header;
   };

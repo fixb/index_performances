@@ -1297,6 +1297,7 @@ function renderReport() {
       [/\bus\b/i, /focus/i, /hedged/i, /parity/i]);
   }
   if (STATE.report.bgcbName === undefined) STATE.report.bgcbName = 'BGCB';
+  if (STATE.report.estimates === undefined) STATE.report.estimates = false;
   STATE.report.bgcbDaily = STATE.report.bgcbDaily || '';
   STATE.report.bgcbWtd = STATE.report.bgcbWtd || '';
   STATE.report.bgcbMtd = STATE.report.bgcbMtd || '';
@@ -1340,6 +1341,8 @@ function renderReport() {
         <input type="checkbox" id="reportWTD"> Inclure WTD</label>
       <label class="ctrl-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
         <input type="checkbox" id="reportMTD"> Inclure MTD</label>
+      <label class="ctrl-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="reportEstimates"${STATE.report.estimates ? ' checked' : ''}> Estimates</label>
       <button class="ctrl-btn" id="reportCopyBtn">Copier</button>
     </div>
     <pre id="reportOutput" style="white-space:pre-wrap;font-family:var(--font-mono);font-size:13px;
@@ -1353,6 +1356,7 @@ function renderReport() {
   const selB = document.getElementById('reportSeriesB');
   const cbW = document.getElementById('reportWTD');
   const cbM = document.getElementById('reportMTD');
+  const cbE = document.getElementById('reportEstimates');
 
   // Auto-cocher selon la dernière observation (réinitialisé si la sélection change)
   const autoFlags = () => {
@@ -1377,17 +1381,21 @@ function renderReport() {
       { key: 'wtd',   label: 'WTD',        on: cbW.checked },
       { key: 'mtd',   label: 'MTD',        on: cbM.checked },
     ];
-    const fmtLine = (label, getVal, decorate) => {
+    // dailyLabel : libellé alternatif pour la période "daily" (ex. "estimates")
+    const fmtLine = (label, getVal, decorate, dailyLabel) => {
       const segs = [];
       periods.forEach(p => {
         if (!p.on) return;
         const v = getVal(p.key);
         if (v == null) return;
         const dot = decorate ? decorate(v) : '';
-        segs.push(`${dot}${fmtPct(v)} (${p.label})`);
+        const plabel = (p.key === 'daily' && dailyLabel) ? dailyLabel : p.label;
+        segs.push(`${dot}${fmtPct(v)} (${plabel})`);
       });
       return segs.length ? `${label} : ${segs.join(' | ')}` : null;
     };
+    // "estimates" au lieu de "last daily" pour BGCB et la relative performance
+    const estLabel = cbE.checked ? 'estimates' : null;
     // Pastille de sur/sous-performance : 🟢 surperf, 🔴 sous-perf, ⚪ à l'équilibre
     const dot = (v) => v > 0 ? '🟢 ' : v < 0 ? '🔴 ' : '⚪ ';
 
@@ -1397,7 +1405,7 @@ function renderReport() {
     // Ligne BGCB (saisie manuelle)
     const bgcbName = (STATE.report.bgcbName || 'BGCB').trim() || 'BGCB';
     const bgcb = { daily: num(STATE.report.bgcbDaily), wtd: num(STATE.report.bgcbWtd), mtd: num(STATE.report.bgcbMtd) };
-    const bgcbLine = fmtLine(bgcbName, k => bgcb[k]);
+    const bgcbLine = fmtLine(bgcbName, k => bgcb[k], null, estLabel);
     if (bgcbLine) lines.push(bgcbLine);
 
     // Lignes indices
@@ -1416,7 +1424,7 @@ function renderReport() {
     const bench = STATE.report.a ? metrics[STATE.report.a] : null;
     if (bench) {
       const relLine = fmtLine(`Relative performance ${bgcbName} vs ${bench.col}`,
-        k => (bgcb[k] != null && bench[k] != null) ? (bgcb[k] - bench[k]) : null, dot);
+        k => (bgcb[k] != null && bench[k] != null) ? (bgcb[k] - bench[k]) : null, dot, estLabel);
       if (relLine) lines.push('', relLine);
     }
 
@@ -1431,6 +1439,7 @@ function renderReport() {
   selB.addEventListener('change', e => { STATE.report.b = e.target.value; autoFlags(); buildText(); });
   cbW.addEventListener('change', buildText);
   cbM.addEventListener('change', buildText);
+  cbE.addEventListener('change', e => { STATE.report.estimates = e.target.checked; buildText(); });
   document.getElementById('bgcbName').addEventListener('input', e => { STATE.report.bgcbName = e.target.value; buildText(); });
   document.getElementById('bgcbDaily').addEventListener('input', e => { STATE.report.bgcbDaily = e.target.value; buildText(); });
   document.getElementById('bgcbWtd').addEventListener('input', e => {

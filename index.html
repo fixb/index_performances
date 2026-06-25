@@ -1235,20 +1235,22 @@ function pickSeries(universe, include, exclude = []) {
 }
 
 // Calcule daily / WTD / MTD + drapeaux d'auto-détection pour une colonne
-function computeReportMetrics(col) {
+function computeReportMetrics(col, asOf) {
   const u = reportUniverse().find(x => x.col === col);
   if (!u) return null;
   const d = STATE.datasets[u.dataset];
   const prices = d.columns[col];
-  const lastIdx = d.dates.length - 1;
-  if (lastIdx < 1) return null;
-  const lastDate = d.dates[lastIdx];
-  const prevDate = d.dates[lastIdx - 1];
 
   const findDateIdx = (dates, target) => {
     for (let i = dates.length - 1; i >= 0; i--) if (dates[i] <= target) return i;
     return 0;
   };
+
+  // Date de référence : asOf si fournie, sinon dernière observation du fichier
+  const lastIdx = asOf ? findDateIdx(d.dates, asOf) : d.dates.length - 1;
+  if (lastIdx < 1) return null;
+  const lastDate = d.dates[lastIdx];
+  const prevDate = d.dates[lastIdx - 1];
 
   // Réf WTD : dernier jour ouvré de la semaine précédente (vendredi en général)
   const wtdRef = new Date(lastDate);
@@ -1298,6 +1300,7 @@ function renderReport() {
   }
   if (STATE.report.bgcbName === undefined) STATE.report.bgcbName = 'BGCB';
   if (STATE.report.estimates === undefined) STATE.report.estimates = false;
+  if (STATE.report.asOf === undefined) STATE.report.asOf = null; // null = date la plus récente
   STATE.report.bgcbDaily = STATE.report.bgcbDaily || '';
   STATE.report.bgcbWtd = STATE.report.bgcbWtd || '';
   STATE.report.bgcbMtd = STATE.report.bgcbMtd || '';
@@ -1305,6 +1308,15 @@ function renderReport() {
   const opt = (sel) => universe.map(u =>
     `<option value="${u.col.replace(/"/g, '&quot;')}"${u.col === sel ? ' selected' : ''}>${u.col}</option>`
   ).join('');
+
+  // Dataset d'ancrage pour le sélecteur de date (série 1, sinon série 2, sinon actif)
+  const dsOf = (col) => universe.find(u => u.col === col)?.dataset;
+  const refDsName = dsOf(STATE.report.a) || dsOf(STATE.report.b)
+    || STATE.activeDataset || Object.keys(STATE.datasets)[0];
+  const refDates = STATE.datasets[refDsName].dates;
+  const latestDate = refDates[refDates.length - 1];
+  const minDate = refDates[0];
+  const asOfValue = STATE.report.asOf || fmtDate(latestDate);
 
   el.innerHTML = `<div class="card">
     <div class="card-title"><div class="dot"></div>Texte de reporting</div>
@@ -1316,6 +1328,13 @@ function renderReport() {
       <div style="display:flex;flex-direction:column;gap:4px;">
         <label class="ctrl-label">Série 2</label>
         <select id="reportSeriesB"><option value="">— Aucune —</option>${opt(STATE.report.b)}</select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Date du reporting</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="date" class="report-input" id="reportAsOf" style="width:150px;" min="${fmtDate(minDate)}" max="${fmtDate(latestDate)}" value="${asOfValue}">
+          <button class="ctrl-btn" id="reportAsOfReset" title="Revenir à la date la plus récente">Plus récente</button>
+        </div>
       </div>
     </div>
     <div class="controls" style="flex-wrap:wrap;gap:12px;margin-bottom:12px;align-items:flex-end;">
@@ -1358,10 +1377,13 @@ function renderReport() {
   const cbM = document.getElementById('reportMTD');
   const cbE = document.getElementById('reportEstimates');
 
-  // Auto-cocher selon la dernière observation (réinitialisé si la sélection change)
+  // Date de reporting effective (null = dernière obs)
+  const getAsOf = () => STATE.report.asOf ? new Date(STATE.report.asOf + 'T23:59:59') : null;
+
+  // Auto-cocher selon la date de reporting (réinitialisé si la sélection change)
   const autoFlags = () => {
-    const ma = STATE.report.a ? computeReportMetrics(STATE.report.a) : null;
-    const mb = STATE.report.b ? computeReportMetrics(STATE.report.b) : null;
+    const ma = STATE.report.a ? computeReportMetrics(STATE.report.a, getAsOf()) : null;
+    const mb = STATE.report.b ? computeReportMetrics(STATE.report.b, getAsOf()) : null;
     const m = ma || mb;
     cbW.checked = !!(m && m.isFirstOfWeek);
     cbM.checked = !!(m && m.isFirstOfMonth);
@@ -1412,7 +1434,7 @@ function renderReport() {
     const metrics = {};
     [STATE.report.a, STATE.report.b].forEach(col => {
       if (!col) return;
-      const m = computeReportMetrics(col);
+      const m = computeReportMetrics(col, getAsOf());
       if (!m) return;
       metrics[col] = m;
       asOf = asOf || fmtDate(m.lastDate);
@@ -1440,6 +1462,16 @@ function renderReport() {
   cbW.addEventListener('change', buildText);
   cbM.addEventListener('change', buildText);
   cbE.addEventListener('change', e => { STATE.report.estimates = e.target.checked; buildText(); });
+  const asOfInput = document.getElementById('reportAsOf');
+  asOfInput.addEventListener('change', e => {
+    STATE.report.asOf = e.target.value || null;
+    autoFlags(); buildText();
+  });
+  document.getElementById('reportAsOfReset').addEventListener('click', () => {
+    STATE.report.asOf = null;
+    asOfInput.value = fmtDate(latestDate);
+    autoFlags(); buildText();
+  });
   document.getElementById('bgcbName').addEventListener('input', e => { STATE.report.bgcbName = e.target.value; buildText(); });
   document.getElementById('bgcbDaily').addEventListener('input', e => { STATE.report.bgcbDaily = e.target.value; buildText(); });
   document.getElementById('bgcbWtd').addEventListener('input', e => {

@@ -595,6 +595,17 @@ label.ctrl-label {
   transition: all 0.2s;
 }
 .date-reset-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+.cmp-period-bar {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.cmp-presets { display: flex; gap: 6px; }
+.cmp-preset { padding: 5px 12px; font-size: 12px; }
+.cmp-period-bar .date-slider-wrap { flex: 1; min-width: 220px; }
 @media (max-width: 900px) {
   .date-bar { padding: 10px 16px; gap: 10px; }
   .date-slider-wrap { min-width: 150px; }
@@ -777,15 +788,35 @@ label.ctrl-label {
         <label class="ctrl-label">Benchmark</label>
         <select id="cmpBench" style="min-width:220px;"></select>
       </div>
-      <div id="cmpPeriodInfo" class="ctrl-label" style="margin-bottom:2px;"></div>
     </div>
+    <div class="cmp-period-bar" id="cmpPeriodBar">
+      <div class="cmp-presets">
+        <button class="ctrl-btn cmp-preset" data-preset="max">Max</button>
+        <button class="ctrl-btn cmp-preset" data-preset="5">5A</button>
+        <button class="ctrl-btn cmp-preset" data-preset="3">3A</button>
+        <button class="ctrl-btn cmp-preset" data-preset="1">1A</button>
+        <button class="ctrl-btn cmp-preset" data-preset="ytd">YTD</button>
+      </div>
+      <div class="date-slider-wrap">
+        <div class="date-slider-track"></div>
+        <div class="date-slider-fill" id="cmpSliderFill"></div>
+        <input type="range" id="cmpSliderStart" min="0" max="100" value="0">
+        <input type="range" id="cmpSliderEnd" min="0" max="100" value="100">
+      </div>
+      <div class="date-input-group">
+        <input type="date" id="cmpDateStart">
+        <span class="date-sep">→</span>
+        <input type="date" id="cmpDateEnd">
+      </div>
+    </div>
+    <div id="cmpPeriodInfo" class="ctrl-label" style="margin:-4px 0 4px;"></div>
     <div class="card">
-      <div class="card-title"><div class="dot"></div>Performance rebasée 100 (période commune)</div>
+      <div class="card-title"><div class="dot"></div>Performance rebasée 100 (période sélectionnée)</div>
       <div class="chart-container tall"><canvas id="chartCompare"></canvas></div>
     </div>
     <div class="grid-2">
       <div class="card">
-        <div class="card-title"><div class="dot"></div>Performances par période (période commune)</div>
+        <div class="card-title"><div class="dot"></div>Performances par période (période sélectionnée)</div>
         <div class="table-wrap" id="cmpReturns"></div>
       </div>
       <div class="card">
@@ -2486,6 +2517,90 @@ function descStats(prices, dates) {
   };
 }
 
+// ---- Period sub-range bar (isolate over/under-performance windows) ----
+let _cmpAlignedDates = null;
+
+function cmpFirstIdxGE(dates, ts) {
+  for (let i = 0; i < dates.length; i++) if (dates[i].getTime() >= ts) return i;
+  return dates.length - 1;
+}
+function cmpLastIdxLE(dates, ts) {
+  for (let i = dates.length - 1; i >= 0; i--) if (dates[i].getTime() <= ts) return i;
+  return 0;
+}
+function cmpUpdateFill() {
+  const s = document.getElementById('cmpSliderStart'), e = document.getElementById('cmpSliderEnd');
+  const max = parseInt(s.max) || 1;
+  const l = Math.min(+s.value, +e.value) / max * 100;
+  const r = Math.max(+s.value, +e.value) / max * 100;
+  const fill = document.getElementById('cmpSliderFill');
+  fill.style.left = l + '%'; fill.style.width = (r - l) + '%';
+}
+function cmpSyncBar(dates, si, ei) {
+  const N = dates.length;
+  const s = document.getElementById('cmpSliderStart'), e = document.getElementById('cmpSliderEnd');
+  s.max = e.max = N - 1; s.value = si; e.value = ei;
+  cmpUpdateFill();
+  const ds = document.getElementById('cmpDateStart'), de = document.getElementById('cmpDateEnd');
+  ds.min = de.min = fmtDate(dates[0]); ds.max = de.max = fmtDate(dates[N - 1]);
+  ds.value = fmtDate(dates[si]); de.value = fmtDate(dates[ei]);
+}
+function cmpSetActivePreset(p) {
+  document.querySelectorAll('#cmpPeriodBar .cmp-preset').forEach(b =>
+    b.classList.toggle('active', p != null && b.dataset.preset === p));
+}
+function cmpCommitFromSliders() {
+  const ds = _cmpAlignedDates; if (!ds) return;
+  const s = +document.getElementById('cmpSliderStart').value;
+  const e = +document.getElementById('cmpSliderEnd').value;
+  const lo = Math.min(s, e), hi = Math.max(s, e);
+  STATE.compare.range = {
+    start: lo <= 0 ? null : ds[lo].getTime(),
+    end: hi >= ds.length - 1 ? null : ds[hi].getTime(),
+  };
+  cmpSetActivePreset(null);
+  renderCompare();
+}
+function cmpApplyDateInputs() {
+  const parseLocal = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
+  const sd = parseLocal(document.getElementById('cmpDateStart').value);
+  const ed = parseLocal(document.getElementById('cmpDateEnd').value);
+  STATE.compare.range = { start: sd ? sd.getTime() : null, end: ed ? ed.getTime() : null };
+  cmpSetActivePreset(null);
+  renderCompare();
+}
+function cmpApplyPreset(p) {
+  const ds = _cmpAlignedDates; if (!ds || !ds.length) return;
+  const last = ds[ds.length - 1];
+  let start = null;
+  if (p === 'ytd') start = new Date(last.getFullYear(), 0, 1);
+  else if (p !== 'max') { start = new Date(last); start.setFullYear(start.getFullYear() - parseInt(p)); }
+  STATE.compare.range = { start: start ? start.getTime() : null, end: null };
+  cmpSetActivePreset(p);
+  renderCompare();
+}
+function cmpWireBar() {
+  if (STATE._cmpBarWired) return;
+  const s = document.getElementById('cmpSliderStart'), e = document.getElementById('cmpSliderEnd');
+  const live = function () {
+    if (+s.value > +e.value) { if (this === s) e.value = s.value; else s.value = e.value; }
+    cmpUpdateFill();
+    const ds = _cmpAlignedDates;
+    if (ds) {
+      document.getElementById('cmpDateStart').value = fmtDate(ds[Math.min(+s.value, +e.value)]);
+      document.getElementById('cmpDateEnd').value = fmtDate(ds[Math.max(+s.value, +e.value)]);
+    }
+  };
+  s.addEventListener('input', live); e.addEventListener('input', live);
+  s.addEventListener('change', cmpCommitFromSliders);
+  e.addEventListener('change', cmpCommitFromSliders);
+  document.getElementById('cmpDateStart').addEventListener('change', cmpApplyDateInputs);
+  document.getElementById('cmpDateEnd').addEventListener('change', cmpApplyDateInputs);
+  document.querySelectorAll('#cmpPeriodBar .cmp-preset').forEach(btn =>
+    btn.addEventListener('click', () => cmpApplyPreset(btn.dataset.preset)));
+  STATE._cmpBarWired = true;
+}
+
 const CMP_BLUE = '#4d8eff', CMP_AMBER = '#ffb84d';
 
 function populateCompareSelectors() {
@@ -2532,11 +2647,41 @@ function renderCompare() {
   if (!fund || !bench) { setEmpty('Chargez un fonds et un benchmark.'); return; }
   if (fund.name === bench.name) { setEmpty('Sélectionnez deux séries différentes.'); return; }
 
-  const al = alignSeries(fund, bench);
-  if (al.dates.length < 3) { setEmpty('Pas de période commune suffisante entre ces deux séries.'); return; }
+  const alFull = alignSeries(fund, bench);
+  if (alFull.dates.length < 3) { setEmpty('Pas de période commune suffisante entre ces deux séries.'); return; }
+
+  cmpWireBar();
+  _cmpAlignedDates = alFull.dates;
+
+  // Resolve the selected sub-range (dates stored in STATE.compare.range).
+  const N = alFull.dates.length;
+  const rg = STATE.compare.range;
+  let si = 0, ei = N - 1;
+  if (rg) {
+    if (rg.start != null) si = cmpFirstIdxGE(alFull.dates, rg.start);
+    if (rg.end != null) ei = cmpLastIdxLE(alFull.dates, rg.end);
+  }
+  if (si < 0) si = 0;
+  if (ei > N - 1 || ei < 0) ei = N - 1;
+  if (si >= ei) { si = 0; ei = N - 1; }
+
+  cmpSyncBar(alFull.dates, si, ei);
+
+  const al = {
+    dates: alFull.dates.slice(si, ei + 1),
+    a: alFull.a.slice(si, ei + 1),
+    b: alFull.b.slice(si, ei + 1),
+  };
+  if (al.dates.length < 3) {
+    if (info) info.textContent = 'Sous-période trop courte — élargissez la sélection.';
+    ['cmpReturns', 'cmpRel', 'cmpStats'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
+    destroyChart('chartCompare'); destroyChart('chartCompareDD');
+    return;
+  }
 
   const n = al.dates.length;
-  if (info) info.textContent = `Période commune : ${fmtDate(al.dates[0])} → ${fmtDate(al.dates[n-1])} (${n} obs.)`;
+  const fullTxt = `${fmtDate(alFull.dates[0])} → ${fmtDate(alFull.dates[N - 1])}`;
+  if (info) info.textContent = `Sélection : ${fmtDate(al.dates[0])} → ${fmtDate(al.dates[n - 1])} (${n} obs.) · commun total : ${fullTxt} (${N} obs.)`;
 
   const fundLabel = fund.name.trim(), benchLabel = bench.name.trim();
 

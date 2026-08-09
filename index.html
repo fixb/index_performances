@@ -832,6 +832,48 @@ label.ctrl-label {
       <div class="card-title"><div class="dot"></div>Drawdown comparé</div>
       <div class="chart-container tall"><canvas id="chartCompareDD"></canvas></div>
     </div>
+    <div class="controls">
+      <label class="ctrl-label">Fenêtre glissante:</label>
+      <select id="cmpRollWin">
+        <option value="21">1 Mois (21j)</option>
+        <option value="63" selected>3 Mois (63j)</option>
+        <option value="126">6 Mois (126j)</option>
+        <option value="252">1 An (252j)</option>
+      </select>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Corrélation glissante (fonds vs benchmark)</div>
+        <div class="chart-container tall"><canvas id="chartCompareCorr"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Sharpe ratio glissant (annualisé)</div>
+        <div class="chart-container tall"><canvas id="chartCompareSharpe"></canvas></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Superposition de deux périodes</div>
+      <div class="controls" style="flex-wrap:wrap;gap:16px;align-items:flex-end;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label class="ctrl-label">Série</label>
+          <select id="ovlSeries">
+            <option value="fund">Fonds</option>
+            <option value="bench">Benchmark</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label class="ctrl-label" style="color:var(--accent-purple)">Période A</label>
+          <div class="date-input-group"><input type="date" id="ovlAStart"><span class="date-sep">→</span><input type="date" id="ovlAEnd"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label class="ctrl-label" style="color:var(--accent-cyan)">Période B</label>
+          <div class="date-input-group"><input type="date" id="ovlBStart"><span class="date-sep">→</span><input type="date" id="ovlBEnd"></div>
+        </div>
+        <button class="ctrl-btn" id="ovlReset">Réinit.</button>
+      </div>
+      <div id="ovlInfo" class="ctrl-label" style="margin:6px 0 4px;"></div>
+      <div class="chart-container tall"><canvas id="chartCompareOverlay"></canvas></div>
+    </div>
   </div>
 
   <!-- CORRELATIONS TAB -->
@@ -2561,10 +2603,13 @@ function cmpCommitFromSliders() {
   cmpSetActivePreset(null);
   renderCompare();
 }
+function cmpParseLocal(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || '');
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
 function cmpApplyDateInputs() {
-  const parseLocal = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
-  const sd = parseLocal(document.getElementById('cmpDateStart').value);
-  const ed = parseLocal(document.getElementById('cmpDateEnd').value);
+  const sd = cmpParseLocal(document.getElementById('cmpDateStart').value);
+  const ed = cmpParseLocal(document.getElementById('cmpDateEnd').value);
   STATE.compare.range = { start: sd ? sd.getTime() : null, end: ed ? ed.getTime() : null };
   cmpSetActivePreset(null);
   renderCompare();
@@ -2598,6 +2643,31 @@ function cmpWireBar() {
   document.getElementById('cmpDateEnd').addEventListener('change', cmpApplyDateInputs);
   document.querySelectorAll('#cmpPeriodBar .cmp-preset').forEach(btn =>
     btn.addEventListener('click', () => cmpApplyPreset(btn.dataset.preset)));
+  const rollSel = document.getElementById('cmpRollWin');
+  if (rollSel) rollSel.addEventListener('change', () => {
+    STATE.compare.rollWin = parseInt(rollSel.value);
+    renderCompare();
+  });
+  // Two-period overlay controls
+  const ovlSeries = document.getElementById('ovlSeries');
+  if (ovlSeries) ovlSeries.addEventListener('change', () => {
+    (STATE.compare.ovl = STATE.compare.ovl || {}).series = ovlSeries.value;
+    renderCompare();
+  });
+  const ovlApply = () => {
+    const o = STATE.compare.ovl = STATE.compare.ovl || {};
+    const g = (id, k) => { const d = cmpParseLocal(document.getElementById(id).value); if (d) o[k] = d.getTime(); };
+    g('ovlAStart', 'aStart'); g('ovlAEnd', 'aEnd'); g('ovlBStart', 'bStart'); g('ovlBEnd', 'bEnd');
+    renderCompare();
+  };
+  ['ovlAStart', 'ovlAEnd', 'ovlBStart', 'ovlBEnd'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.addEventListener('change', ovlApply);
+  });
+  const ovlReset = document.getElementById('ovlReset');
+  if (ovlReset) ovlReset.addEventListener('click', () => {
+    STATE.compare.ovl = { series: (STATE.compare.ovl && STATE.compare.ovl.series) || 'fund' };
+    renderCompare();
+  });
   STATE._cmpBarWired = true;
 }
 
@@ -2612,6 +2682,7 @@ function populateCompareSelectors() {
   const cols = new Set(uni.map(u => u.col));
 
   STATE.compare = STATE.compare || {};
+  if (STATE.compare.rollWin == null) STATE.compare.rollWin = 63;
   if (!cols.has(STATE.compare.fund)) {
     STATE.compare.fund = pickSeries(uni, [/eur/i], [/global/i, /focus/i, /parity/i]) || uni[0].col;
   }
@@ -2816,6 +2887,124 @@ function renderCompare() {
       scales: {
         x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
         y: { title: { display: true, text: 'Drawdown (%)', color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+
+  // ---- Rolling correlation & rolling Sharpe (on the selected window) ----
+  if (STATE.compare.rollWin == null) STATE.compare.rollWin = 63;
+  const winSel = document.getElementById('cmpRollWin');
+  if (winSel) winSel.value = String(STATE.compare.rollWin);
+  let win = STATE.compare.rollWin;
+  win = Math.min(win, Math.floor(rf.length / 2));   // adapt to short selections
+  const rollLabels = [], rollCorr = [], rollShF = [], rollShB = [];
+  if (win >= 10 && rf.length > win) {
+    for (let i = win; i <= rf.length; i++) {
+      const sf = rf.slice(i - win, i), sb = rb.slice(i - win, i);
+      rollLabels.push(fmtDate(al.dates[i]));
+      rollCorr.push(correlation(sf, sb));
+      const vF = stdev(sf) * Math.sqrt(252), vB = stdev(sb) * Math.sqrt(252);
+      rollShF.push(vF > 0 ? mean(sf) * 252 / vF : null);
+      rollShB.push(vB > 0 ? mean(sb) * 252 / vB : null);
+    }
+  }
+  const rollAxis = (title, opts = {}) => ({
+    x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+    y: { ...opts, title: { display: true, text: title, color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+  });
+
+  destroyChart('chartCompareCorr');
+  STATE.charts['chartCompareCorr'] = new Chart(document.getElementById('chartCompareCorr'), {
+    type: 'line',
+    data: { labels: rollLabels, datasets: [
+      { label: `Corrélation ${win}j`, data: rollCorr, borderColor: CMP_BLUE, backgroundColor: CMP_BLUE + '15', fill: true, borderWidth: 1.4, pointRadius: 0, tension: 0.1 },
+    ] },
+    options: { ...chartOpts(''), scales: rollAxis('Corrélation', { min: -1, max: 1 }) }
+  });
+
+  destroyChart('chartCompareSharpe');
+  STATE.charts['chartCompareSharpe'] = new Chart(document.getElementById('chartCompareSharpe'), {
+    type: 'line',
+    data: { labels: rollLabels, datasets: [
+      { label: fundLabel, data: rollShF, borderColor: CMP_BLUE, backgroundColor: 'transparent', borderWidth: 1.4, pointRadius: 0, tension: 0.1 },
+      { label: benchLabel, data: rollShB, borderColor: CMP_AMBER, backgroundColor: 'transparent', borderWidth: 1.4, pointRadius: 0, tension: 0.1 },
+    ] },
+    options: { ...chartOpts(''), scales: rollAxis(`Sharpe glissant (${win}j)`) }
+  });
+
+  renderOverlay(alFull, fundLabel, benchLabel);
+}
+
+// Overlay two arbitrary periods of the selected series, rebased to 100 on a
+// "trading days since start" axis, to compare different regimes side by side.
+function renderOverlay(alFull, fundLabel, benchLabel) {
+  const o = STATE.compare.ovl = STATE.compare.ovl || {};
+  if (o.series == null) o.series = 'fund';
+  const dts = alFull.dates, N = dts.length;
+  const start0 = dts[0], end = dts[N - 1];
+
+  // Defaults: two most-recent non-overlapping 1Y windows, else split in halves.
+  if (o.aStart == null) {
+    const y1 = new Date(end); y1.setFullYear(end.getFullYear() - 1);
+    const y2 = new Date(end); y2.setFullYear(end.getFullYear() - 2);
+    if (y2 >= start0) {
+      o.aStart = y2.getTime(); o.aEnd = y1.getTime(); o.bStart = y1.getTime(); o.bEnd = end.getTime();
+    } else {
+      const mid = dts[Math.floor(N / 2)];
+      o.aStart = start0.getTime(); o.aEnd = mid.getTime(); o.bStart = mid.getTime(); o.bEnd = end.getTime();
+    }
+  }
+
+  const seriesSel = document.getElementById('ovlSeries');
+  if (seriesSel) seriesSel.value = o.series;
+  const prices = o.series === 'bench' ? alFull.b : alFull.a;
+  const seriesName = o.series === 'bench' ? benchLabel : fundLabel;
+
+  // Reflect date inputs (bounds + values).
+  const setInput = (id, ts) => {
+    const el = document.getElementById(id); if (!el) return;
+    el.min = fmtDate(start0); el.max = fmtDate(end); el.value = fmtDate(new Date(ts));
+  };
+  setInput('ovlAStart', o.aStart); setInput('ovlAEnd', o.aEnd);
+  setInput('ovlBStart', o.bStart); setInput('ovlBEnd', o.bEnd);
+
+  const sub = (sTs, eTs) => {
+    let s = cmpFirstIdxGE(dts, sTs), e = cmpLastIdxLE(dts, eTs);
+    if (e < s) { const t = s; s = e; e = t; }
+    return { arr: prices.slice(s, e + 1), d0: dts[s], d1: dts[e] };
+  };
+  const A = sub(o.aStart, o.aEnd), B = sub(o.bStart, o.bEnd);
+
+  const info = document.getElementById('ovlInfo');
+  destroyChart('chartCompareOverlay');
+  if (A.arr.length < 2 || B.arr.length < 2) {
+    if (info) info.textContent = 'Sélectionnez deux périodes d\'au moins quelques jours.';
+    return;
+  }
+  const totRet = arr => (arr[arr.length - 1] / arr[0] - 1) * 100;
+  if (info) info.innerHTML =
+    `<span style="color:var(--accent-purple)">A : ${fmtDate(A.d0)} → ${fmtDate(A.d1)} (${A.arr.length}j, ${fmtPct(totRet(A.arr))})</span>` +
+    ` &nbsp;·&nbsp; <span style="color:var(--accent-cyan)">B : ${fmtDate(B.d0)} → ${fmtDate(B.d1)} (${B.arr.length}j, ${fmtPct(totRet(B.arr))})</span>` +
+    ` &nbsp;·&nbsp; ${seriesName}`;
+
+  const maxLen = Math.max(A.arr.length, B.arr.length);
+  const labels = Array.from({ length: maxLen }, (_, i) => i);
+  const rebPad = arr => { const r = arr.map(v => v / arr[0] * 100); while (r.length < maxLen) r.push(null); return r; };
+
+  STATE.charts['chartCompareOverlay'] = new Chart(document.getElementById('chartCompareOverlay'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: `A : ${fmtDate(A.d0)} → ${fmtDate(A.d1)}`, data: rebPad(A.arr), borderColor: '#a855f7', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1 },
+        { label: `B : ${fmtDate(B.d0)} → ${fmtDate(B.d1)}`, data: rebPad(B.arr), borderColor: '#22d3ee', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1 },
+      ]
+    },
+    options: {
+      ...chartOpts(''),
+      scales: {
+        x: { title: { display: true, text: 'Jours ouvrés depuis le début', color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+        y: { title: { display: true, text: 'Base 100', color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
       }
     }
   });

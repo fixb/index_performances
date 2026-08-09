@@ -859,6 +859,7 @@ label.ctrl-label {
           <select id="ovlSeries">
             <option value="fund">Fonds</option>
             <option value="bench">Benchmark</option>
+            <option value="rel">Relatif (Fonds / Bench)</option>
           </select>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;">
@@ -2957,8 +2958,10 @@ function renderOverlay(alFull, fundLabel, benchLabel) {
 
   const seriesSel = document.getElementById('ovlSeries');
   if (seriesSel) seriesSel.value = o.series;
-  const prices = o.series === 'bench' ? alFull.b : alFull.a;
-  const seriesName = o.series === 'bench' ? benchLabel : fundLabel;
+  let prices, seriesName;
+  if (o.series === 'bench') { prices = alFull.b; seriesName = benchLabel; }
+  else if (o.series === 'rel') { prices = alFull.a.map((v, i) => v / alFull.b[i]); seriesName = `${fundLabel} / ${benchLabel} (relatif)`; }
+  else { prices = alFull.a; seriesName = fundLabel; }
 
   // Reflect date inputs (bounds + values).
   const setInput = (id, ts) => {

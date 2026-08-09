@@ -1002,7 +1002,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 function refreshTab(tab) {
   if (!STATE.activeDataset) return;
-  if (tab === 'compare') { renderCompare(); return; }
+  if (tab === 'compare') { renderCompare(); injectExportButtons(); return; }
   const d = getFilteredDataset();
   if (!d || d.dates.length < 2) return;
   switch(tab) {
@@ -1014,6 +1014,7 @@ function refreshTab(tab) {
     case 'correl': renderCorrelations(d); break;
     case 'ranking': renderRanking(d); break;
   }
+  injectExportButtons();
 }
 
 // ============================================================
@@ -2684,15 +2685,6 @@ function cmpWireBar() {
     STATE.compare.ovl = { series: (STATE.compare.ovl && STATE.compare.ovl.series) || 'fund' };
     renderCompare();
   });
-  // Per-chart export (XLSX data / JPG image), delegated.
-  const tabEl = document.getElementById('tab-compare');
-  if (tabEl) tabEl.addEventListener('click', e => {
-    const btn = e.target.closest('.export-btn'); if (!btn) return;
-    const id = btn.dataset.export, name = btn.dataset.name || id;
-    if (!STATE.charts[id]) { alert('Graphique non disponible — chargez les données d\'abord.'); return; }
-    if (btn.dataset.type === 'jpeg') exportChartImage(id, name);
-    else exportChartData(id, btn.dataset.label || 'Date', name);
-  });
   STATE._cmpBarWired = true;
 }
 
@@ -2716,15 +2708,92 @@ function exportChartImage(chartId, name) {
 // XLSX export: the chart's underlying data (labels + one column per series).
 function exportChartData(chartId, labelHeader, name) {
   const ch = STATE.charts[chartId]; if (!ch) return;
-  const labels = ch.data.labels || [], ds = ch.data.datasets;
-  const rows = [[labelHeader, ...ds.map(d => d.label)]];
-  for (let i = 0; i < labels.length; i++)
-    rows.push([labels[i], ...ds.map(d => { const v = d.data[i]; return v == null ? '' : v; })]);
+  const ds = ch.data.datasets || [];
+  const isPoint = ds.some(d => d.data && d.data.length && d.data[0] && typeof d.data[0] === 'object' && 'y' in d.data[0]);
+  let rows;
+  if (isPoint) {
+    // Scatter/point charts (e.g. QQ-plot): one x/y pair per dataset.
+    const header = [];
+    ds.forEach(d => header.push((d.label || 'série') + ' x', (d.label || 'série') + ' y'));
+    rows = [header];
+    const maxLen = Math.max(...ds.map(d => d.data.length));
+    for (let i = 0; i < maxLen; i++) {
+      const row = [];
+      ds.forEach(d => { const p = d.data[i]; row.push(p ? p.x : '', p ? p.y : ''); });
+      rows.push(row);
+    }
+  } else {
+    const labels = ch.data.labels || [];
+    if (!labelHeader) {
+      const s0 = labels[0];
+      labelHeader = (typeof s0 === 'string' && /^\d{4}-\d{2}-\d{2}/.test(s0)) ? 'Date'
+        : (typeof s0 === 'number' ? 'X' : 'Label');
+    }
+    rows = [[labelHeader, ...ds.map((d, i) => d.label || ('série ' + (i + 1)))]];
+    for (let i = 0; i < labels.length; i++)
+      rows.push([labels[i], ...ds.map(d => { const v = d.data[i]; return v == null ? '' : (typeof v === 'object' ? v.y : v); })]);
+  }
   const ws = XLSX.utils.aoa_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Donnees');
   XLSX.writeFile(wb, name + '.xlsx');
 }
+// XLSX export of a rendered HTML table; numeric-looking cells are coerced.
+function exportTableXLSX(wrapId, name) {
+  const wrap = document.getElementById(wrapId); if (!wrap) return;
+  const table = wrap.querySelector('table');
+  if (!table) { alert('Aucun tableau à exporter.'); return; }
+  const aoa = [];
+  table.querySelectorAll('tr').forEach(tr => {
+    const row = [];
+    tr.querySelectorAll('th,td').forEach(cell => {
+      const t = cell.textContent.trim();
+      const num = t.replace(/\s/g, '').replace('%', '').replace('+', '').replace(/,/g, '');
+      row.push(num !== '' && num !== '-' && !isNaN(Number(num)) ? Number(num) : t);
+    });
+    if (row.length) aoa.push(row);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Donnees');
+  XLSX.writeFile(wb, name + '.xlsx');
+}
+function slugify(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'export';
+}
+// Add export buttons to every chart/table card that doesn't already have them.
+function injectExportButtons() {
+  document.querySelectorAll('main .card').forEach(card => {
+    const title = card.querySelector('.card-title');
+    if (!title || title.querySelector('.card-export')) return;
+    const canvas = card.querySelector('canvas');
+    const tableWrap = card.querySelector('.table-wrap');
+    const name = slugify(title.textContent);
+    const span = document.createElement('span');
+    span.className = 'card-export';
+    if (canvas && canvas.id) {
+      span.innerHTML =
+        `<button class="export-btn" data-export="${canvas.id}" data-type="xlsx" data-name="${name}">XLSX</button>` +
+        `<button class="export-btn" data-export="${canvas.id}" data-type="jpeg" data-name="${name}">JPG</button>`;
+    } else if (tableWrap && tableWrap.id) {
+      span.innerHTML = `<button class="export-btn" data-export-table="${tableWrap.id}" data-type="xlsx" data-name="${name}">XLSX</button>`;
+    } else { return; }
+    title.appendChild(span);
+  });
+}
+// Single delegated listener for all export buttons (charts and tables).
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.export-btn'); if (!btn) return;
+  if (btn.dataset.export) {
+    const id = btn.dataset.export, name = btn.dataset.name || id;
+    if (!STATE.charts[id]) { alert('Graphique non disponible — ouvrez l\'onglet et chargez les données.'); return; }
+    if (btn.dataset.type === 'jpeg') exportChartImage(id, name);
+    else exportChartData(id, btn.dataset.label || '', name);
+  } else if (btn.dataset.exportTable) {
+    exportTableXLSX(btn.dataset.exportTable, btn.dataset.name || btn.dataset.exportTable);
+  }
+});
 
 const CMP_BLUE = '#4d8eff', CMP_AMBER = '#ffb84d';
 

@@ -622,6 +622,7 @@ label.ctrl-label {
   <button class="tab-btn" data-tab="distribution">Distributions</button>
   <button class="tab-btn" data-tab="rolling">Glissant</button>
   <button class="tab-btn" data-tab="stats">Statistiques</button>
+  <button class="tab-btn" data-tab="compare">Fonds vs Benchmark</button>
   <button class="tab-btn" data-tab="correl">Corrélations & Betas</button>
   <button class="tab-btn" data-tab="ranking">Rankings</button>
 </nav>
@@ -765,6 +766,43 @@ label.ctrl-label {
     </div>
   </div>
 
+  <!-- COMPARE (FONDS vs BENCHMARK) TAB -->
+  <div class="tab-content" id="tab-compare">
+    <div class="controls" style="flex-wrap:wrap;gap:16px;align-items:flex-end;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Fonds / Part</label>
+        <select id="cmpFund" style="min-width:220px;"></select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Benchmark</label>
+        <select id="cmpBench" style="min-width:220px;"></select>
+      </div>
+      <div id="cmpPeriodInfo" class="ctrl-label" style="margin-bottom:2px;"></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Performance rebasée 100 (période commune)</div>
+      <div class="chart-container tall"><canvas id="chartCompare"></canvas></div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Performances par période (période commune)</div>
+        <div class="table-wrap" id="cmpReturns"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Statistiques relatives (fonds vs benchmark)</div>
+        <div class="table-wrap" id="cmpRel"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Statistiques descriptives comparées</div>
+      <div class="table-wrap" id="cmpStats"></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Drawdown comparé</div>
+      <div class="chart-container tall"><canvas id="chartCompareDD"></canvas></div>
+    </div>
+  </div>
+
   <!-- CORRELATIONS TAB -->
   <div class="tab-content" id="tab-correl">
     <div class="file-selector" id="correlFileSelector"></div>
@@ -864,7 +902,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     // Show/hide date bar
     const dateBar = document.getElementById('dateBar');
-    if (btn.dataset.tab === 'upload' || !STATE.activeDataset) {
+    if (btn.dataset.tab === 'upload' || btn.dataset.tab === 'compare' || !STATE.activeDataset) {
       dateBar.classList.remove('visible');
     } else {
       dateBar.classList.add('visible');
@@ -875,6 +913,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 function refreshTab(tab) {
   if (!STATE.activeDataset) return;
+  if (tab === 'compare') { renderCompare(); return; }
   const d = getFilteredDataset();
   if (!d || d.dates.length < 2) return;
   switch(tab) {
@@ -911,14 +950,59 @@ function handleFiles(files) {
         const data = new Uint8Array(e.target.result);
         const wb = XLSX.read(data, { type: 'array', cellDates: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(ws, { raw: false });
-        parseDataset(file.name, json);
+        // Read as a matrix so we can detect the real header row.
+        // Some fund track-record files carry a title row + blank row before
+        // the actual "Date | <share classes>" header (cf. format B&G).
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, blankrows: false });
+        parseDataset(file.name, aoaToRecords(aoa));
       } catch(err) {
         alert('Erreur lecture: ' + err.message);
       }
     };
     reader.readAsArrayBuffer(file);
   }
+}
+
+// Convert a raw sheet matrix (array of rows) into records keyed by the header
+// row. Detects a "Date" header even when preceded by title/blank rows.
+function aoaToRecords(aoa) {
+  if (!aoa || !aoa.length) return [];
+  let hdr = 0;
+  for (let i = 0; i < Math.min(aoa.length, 30); i++) {
+    const first = aoa[i] && aoa[i][0] != null ? String(aoa[i][0]).trim().toLowerCase() : '';
+    if (first === 'date') { hdr = i; break; }
+  }
+  const headerRow = (aoa[hdr] || []).map(h => (h == null ? '' : String(h).trim()));
+  const records = [];
+  for (let i = hdr + 1; i < aoa.length; i++) {
+    const row = aoa[i];
+    if (!row) continue;
+    const obj = {};
+    headerRow.forEach((h, c) => { if (h !== '') obj[h] = row[c]; });
+    records.push(obj);
+  }
+  return records;
+}
+
+// Robust numeric parser: strips currency symbols / spaces and resolves
+// thousands vs decimal separators (handles "€ 1,600.69", "1.600,69", etc.).
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  if (v == null) return NaN;
+  let s = String(v).trim().replace(/[^0-9.,\-]/g, '');
+  if (s === '' || s === '-') return NaN;
+  const hasComma = s.indexOf(',') > -1, hasDot = s.indexOf('.') > -1;
+  if (hasComma && hasDot) {
+    s = (s.lastIndexOf(',') > s.lastIndexOf('.'))
+      ? s.replace(/\./g, '').replace(',', '.')   // comma is the decimal sep
+      : s.replace(/,/g, '');                      // dot is the decimal sep
+  } else if (hasComma) {
+    const parts = s.split(',');
+    s = (parts.length === 2 && parts[1].length <= 2)
+      ? parts[0] + '.' + parts[1]                 // "1600,69" -> decimal
+      : s.replace(/,/g, '');                       // "1,234" -> thousands
+  }
+  return parseFloat(s);
 }
 
 function parseDataset(name, json) {
@@ -937,13 +1021,27 @@ function parseDataset(name, json) {
     let valid = true;
     const vals = {};
     for (const c of valueCols) {
-      const v = parseFloat(String(row[c]).replace(',','.'));
+      const v = parseNum(row[c]);
       if (isNaN(v)) { valid = false; break; }
       vals[c] = v;
     }
     if (!valid) continue;
     dates.push(d);
     for (const c of valueCols) columns[c].push(vals[c]);
+  }
+
+  // Ensure chronological (ascending) order — some track-record files are
+  // exported most-recent-first, which would break every downstream metric.
+  let ascending = true;
+  for (let i = 1; i < dates.length; i++) {
+    if (dates[i] < dates[i - 1]) { ascending = false; break; }
+  }
+  if (!ascending) {
+    const order = dates.map((_, i) => i).sort((a, b) => dates[a] - dates[b]);
+    const sortedDates = order.map(i => dates[i]);
+    dates.length = 0;
+    sortedDates.forEach(d => dates.push(d));
+    for (const c of valueCols) columns[c] = order.map(i => columns[c][i]);
   }
 
   STATE.datasets[name] = { dates, columns, name };
@@ -990,6 +1088,9 @@ function updateUI() {
 
   // Reporting text generator
   renderReport();
+
+  // Fund vs benchmark comparison selectors
+  populateCompareSelectors();
 
   // Init date bar
   initDateBar();
@@ -2291,6 +2392,280 @@ function renderStats(d) {
   STATE.charts['chartDrawdown'] = new Chart(document.getElementById('chartDrawdown'), {
     type: 'line',
     data: { labels: d.dates.map(fmtDate), datasets: ddDatasets },
+    options: {
+      ...chartOpts(''),
+      scales: {
+        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+        y: { title: { display: true, text: 'Drawdown (%)', color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+}
+
+// ============================================================
+// FONDS vs BENCHMARK TAB
+// ============================================================
+function seriesFor(colName) {
+  const u = reportUniverse().find(x => x.col === colName);
+  if (!u) return null;
+  const d = STATE.datasets[u.dataset];
+  return { dates: d.dates, prices: d.columns[colName], name: colName, dataset: u.dataset };
+}
+
+// Intersect two ascending series on their common calendar days.
+function alignSeries(a, b) {
+  const key = dt => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+  const mb = new Map();
+  b.dates.forEach((dt, i) => mb.set(key(dt), b.prices[i]));
+  const dates = [], pa = [], pb = [];
+  a.dates.forEach((dt, i) => {
+    const k = key(dt);
+    if (mb.has(k) && a.prices[i] != null) {
+      dates.push(dt); pa.push(a.prices[i]); pb.push(mb.get(k));
+    }
+  });
+  return { dates, a: pa, b: pb };
+}
+
+// Cumulative returns over standard periods, computed on the given series.
+function periodReturns(dates, prices) {
+  const n = dates.length;
+  if (n < 2) return {};
+  const last = dates[n - 1];
+  const findIdx = target => { for (let i = n - 1; i >= 0; i--) if (dates[i] <= target) return i; return 0; };
+  const r = idx => (idx == null || idx >= n - 1) ? null : (prices[n - 1] / prices[idx] - 1) * 100;
+  const wtdRef = new Date(last); const dow = wtdRef.getDay() || 7;
+  wtdRef.setHours(0, 0, 0, 0); wtdRef.setDate(wtdRef.getDate() - dow);
+  const mtdRef = new Date(last.getFullYear(), last.getMonth(), 0);
+  const qtdRef = new Date(last.getFullYear(), Math.floor(last.getMonth() / 3) * 3, 0);
+  const ytdRef = new Date(last.getFullYear() - 1, 11, 31);
+  const yAgo = k => { const x = new Date(last); x.setFullYear(x.getFullYear() - k); return x; };
+  const cum = (prices[n - 1] / prices[0] - 1) * 100;
+  const annYears = (dates[n - 1] - dates[0]) / (365.25 * 86400000);
+  return {
+    '1J': r(n - 2),
+    'WTD': r(findIdx(wtdRef)),
+    'MTD': r(findIdx(mtdRef)),
+    'QTD': r(findIdx(qtdRef)),
+    'YTD': r(findIdx(ytdRef)),
+    '1A': r(findIdx(yAgo(1))),
+    '3A': r(findIdx(yAgo(3))),
+    '5A': r(findIdx(yAgo(5))),
+    'Depuis origine': cum,
+    'Annualisée': annYears > 0 ? (Math.pow(1 + cum / 100, 1 / annYears) - 1) * 100 : null,
+  };
+}
+
+// Full descriptive stats for a price series (consistent with the Stats tab).
+function descStats(prices, dates) {
+  const n = prices.length;
+  const r = computeReturns(prices);
+  const cum = prices[n - 1] / prices[0] - 1;
+  const ann = annualize(cum, n - 1);
+  const vol = stdev(r) * Math.sqrt(252);
+  const mdd = maxDrawdown(prices);
+  const downR = r.filter(v => v < 0);
+  const downVol = downR.length ? stdev(downR) * Math.sqrt(252) : 0;
+  const rr = r.map(v => v * 100);
+  const thr = percentile(rr, 5);
+  const tail = rr.filter(v => v <= thr);
+  return {
+    period: fmtDate(dates[0]) + ' → ' + fmtDate(dates[n - 1]),
+    obs: n,
+    cum: cum * 100, ann: ann * 100, vol: vol * 100,
+    sharpe: vol > 0 ? ann / vol : null,
+    sortino: downVol > 0 ? ann / downVol : null,
+    mdd: mdd * 100,
+    calmar: Math.abs(mdd) > 0 ? ann / Math.abs(mdd) : null,
+    dailyMean: mean(r) * 100, dailyVol: stdev(r) * 100,
+    skew: skewness(r), kurt: kurtosis(r),
+    best: Math.max(...r) * 100, worst: Math.min(...r) * 100,
+    posPct: r.filter(v => v >= 0).length / r.length * 100,
+    var95: percentile(rr, 5),
+    cvar95: tail.length ? mean(tail) : null,
+  };
+}
+
+const CMP_BLUE = '#4d8eff', CMP_AMBER = '#ffb84d';
+
+function populateCompareSelectors() {
+  const fundSel = document.getElementById('cmpFund');
+  const benchSel = document.getElementById('cmpBench');
+  if (!fundSel || !benchSel) return;
+  const uni = reportUniverse();
+  if (!uni.length) { fundSel.innerHTML = benchSel.innerHTML = ''; return; }
+  const cols = new Set(uni.map(u => u.col));
+
+  STATE.compare = STATE.compare || {};
+  if (!cols.has(STATE.compare.fund)) {
+    STATE.compare.fund = pickSeries(uni, [/eur/i], [/global/i, /focus/i, /parity/i]) || uni[0].col;
+  }
+  if (!cols.has(STATE.compare.bench)) {
+    STATE.compare.bench = pickSeries(uni, [/global/i, /focus/i, /hedged/i], [/parity/i])
+      || (uni.find(u => u.col !== STATE.compare.fund) || uni[0]).col;
+  }
+
+  const opt = sel => uni.map(u => {
+    const label = `${u.col.trim()} — ${shortName(u.dataset)}`;
+    return `<option value="${u.col.replace(/"/g, '&quot;')}"${u.col === sel ? ' selected' : ''}>${label}</option>`;
+  }).join('');
+  fundSel.innerHTML = opt(STATE.compare.fund);
+  benchSel.innerHTML = opt(STATE.compare.bench);
+
+  fundSel.onchange = e => { STATE.compare.fund = e.target.value; renderCompare(); };
+  benchSel.onchange = e => { STATE.compare.bench = e.target.value; renderCompare(); };
+}
+
+function renderCompare() {
+  const info = document.getElementById('cmpPeriodInfo');
+  const setEmpty = msg => {
+    if (info) info.textContent = msg || '';
+    ['cmpReturns', 'cmpRel', 'cmpStats'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+    destroyChart('chartCompare'); destroyChart('chartCompareDD');
+  };
+
+  STATE.compare = STATE.compare || {};
+  const fund = seriesFor(STATE.compare.fund);
+  const bench = seriesFor(STATE.compare.bench);
+  if (!fund || !bench) { setEmpty('Chargez un fonds et un benchmark.'); return; }
+  if (fund.name === bench.name) { setEmpty('Sélectionnez deux séries différentes.'); return; }
+
+  const al = alignSeries(fund, bench);
+  if (al.dates.length < 3) { setEmpty('Pas de période commune suffisante entre ces deux séries.'); return; }
+
+  const n = al.dates.length;
+  if (info) info.textContent = `Période commune : ${fmtDate(al.dates[0])} → ${fmtDate(al.dates[n-1])} (${n} obs.)`;
+
+  const fundLabel = fund.name.trim(), benchLabel = bench.name.trim();
+
+  // ---- Rebased 100 chart ----
+  destroyChart('chartCompare');
+  const reb = arr => arr.map(v => v / arr[0] * 100);
+  STATE.charts['chartCompare'] = new Chart(document.getElementById('chartCompare'), {
+    type: 'line',
+    data: {
+      labels: al.dates.map(fmtDate),
+      datasets: [
+        { label: fundLabel, data: reb(al.a), borderColor: CMP_BLUE, backgroundColor: CMP_BLUE + '15', fill: true, borderWidth: 1.6, pointRadius: 0, tension: 0.1 },
+        { label: benchLabel, data: reb(al.b), borderColor: CMP_AMBER, backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1 },
+      ]
+    },
+    options: {
+      ...chartOpts(''),
+      scales: {
+        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+        y: { title: { display: true, text: 'Base 100', color: '#8b92a5', font: { size: 11 } }, ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(37,42,54,0.5)' } }
+      }
+    }
+  });
+
+  // ---- Period returns table ----
+  const pf = periodReturns(al.dates, al.a);
+  const pb = periodReturns(al.dates, al.b);
+  const perLabels = ['1J', 'WTD', 'MTD', 'QTD', 'YTD', '1A', '3A', '5A', 'Depuis origine', 'Annualisée'];
+  let rhtml = `<table><tr><th>Période</th><th>${fundLabel}</th><th>${benchLabel}</th><th>Écart (pp)</th></tr>`;
+  perLabels.forEach(k => {
+    const a = pf[k], b = pb[k];
+    const diff = (a != null && b != null) ? a - b : null;
+    rhtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${k}</td>` +
+      `<td class="${a!=null?pctClass(a):''}">${a!=null?fmtPct(a):'—'}</td>` +
+      `<td class="${b!=null?pctClass(b):''}">${b!=null?fmtPct(b):'—'}</td>` +
+      `<td class="${diff!=null?pctClass(diff):''}">${diff!=null?fmtPct(diff):'—'}</td></tr>`;
+  });
+  rhtml += '</table>';
+  document.getElementById('cmpReturns').innerHTML = rhtml;
+
+  // ---- Relative statistics ----
+  const rf = computeReturns(al.a), rb = computeReturns(al.b);
+  const corr = correlation(rf, rb);
+  const b = beta(rf, rb);
+  const alphaAnn = (mean(rf) - b * mean(rb)) * 252 * 100;
+  const active = rf.map((v, i) => v - rb[i]);
+  const te = stdev(active) * Math.sqrt(252) * 100;
+  const fAnn = annualize(al.a[n - 1] / al.a[0] - 1, n - 1) * 100;
+  const bAnn = annualize(al.b[n - 1] / al.b[0] - 1, n - 1) * 100;
+  const activeAnn = fAnn - bAnn;
+  const ir = te > 0 ? activeAnn / te : null;
+  let fUp = 1, bUp = 1, fDn = 1, bDn = 1;
+  for (let i = 0; i < rb.length; i++) {
+    if (rb[i] > 0) { fUp *= 1 + rf[i]; bUp *= 1 + rb[i]; }
+    else if (rb[i] < 0) { fDn *= 1 + rf[i]; bDn *= 1 + rb[i]; }
+  }
+  const upCap = (bUp - 1) !== 0 ? (fUp - 1) / (bUp - 1) * 100 : null;
+  const dnCap = (bDn - 1) !== 0 ? (fDn - 1) / (bDn - 1) * 100 : null;
+  const relRows = [
+    ['Corrélation', corr.toFixed(3), false],
+    ['R²', (corr * corr).toFixed(3), false],
+    ['Beta', b.toFixed(3), false],
+    ['Alpha annualisé', fmtPct(alphaAnn), true],
+    ['Surperformance annualisée', fmtPct(activeAnn), true],
+    ['Tracking error (ann.)', fmtPct(te), false],
+    ['Information ratio', ir != null ? ir.toFixed(3) : '—', false],
+    ['Up capture', upCap != null ? upCap.toFixed(1) + '%' : '—', false],
+    ['Down capture', dnCap != null ? dnCap.toFixed(1) + '%' : '—', false],
+  ];
+  let relHtml = '<table><tr><th>Mesure</th><th>Valeur</th></tr>';
+  relRows.forEach(([label, val, colorize]) => {
+    const num = parseFloat(String(val).replace(/[+%]/g, ''));
+    relHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${label}</td>` +
+      `<td class="${colorize && !isNaN(num) ? pctClass(num) : ''}">${val}</td></tr>`;
+  });
+  relHtml += '</table>';
+  document.getElementById('cmpRel').innerHTML = relHtml;
+
+  // ---- Descriptive statistics side by side ----
+  const sf = descStats(al.a, al.dates);
+  const sb = descStats(al.b, al.dates);
+  const pp = v => v == null ? '—' : fmtPct(v);
+  const rc = (v, d = 3) => v == null ? '—' : v.toFixed(d);
+  const rows = [
+    ['Période', sf.period, sb.period, null, 'txt'],
+    ['Observations', sf.obs, sb.obs, null, 'txt'],
+    ['Performance cumulée', pp(sf.cum), pp(sb.cum), sf.cum - sb.cum, 'pct'],
+    ['Performance annualisée', pp(sf.ann), pp(sb.ann), sf.ann - sb.ann, 'pct'],
+    ['Volatilité annualisée', pp(sf.vol), pp(sb.vol), sf.vol - sb.vol, 'pct'],
+    ['Sharpe Ratio', rc(sf.sharpe), rc(sb.sharpe), (sf.sharpe ?? 0) - (sb.sharpe ?? 0), 'num'],
+    ['Sortino Ratio', rc(sf.sortino), rc(sb.sortino), (sf.sortino ?? 0) - (sb.sortino ?? 0), 'num'],
+    ['Max Drawdown', pp(sf.mdd), pp(sb.mdd), sf.mdd - sb.mdd, 'pct'],
+    ['Calmar Ratio', rc(sf.calmar), rc(sb.calmar), (sf.calmar ?? 0) - (sb.calmar ?? 0), 'num'],
+    ['Rendement moyen quotidien', pp(sf.dailyMean, 4), pp(sb.dailyMean, 4), null, 'txt'],
+    ['Vol quotidienne', fmtPct(sf.dailyVol, 4), fmtPct(sb.dailyVol, 4), null, 'txt'],
+    ['Skewness', rc(sf.skew, 4), rc(sb.skew, 4), null, 'txt'],
+    ['Kurtosis (exc.)', rc(sf.kurt, 4), rc(sb.kurt, 4), null, 'txt'],
+    ['Meilleur jour', pp(sf.best), pp(sb.best), null, 'txt'],
+    ['Pire jour', pp(sf.worst), pp(sb.worst), null, 'txt'],
+    ['% Jours positifs', sf.posPct.toFixed(1) + '%', sb.posPct.toFixed(1) + '%', sf.posPct - sb.posPct, 'pct'],
+    ['VaR 95% (1j)', pp(sf.var95), pp(sb.var95), null, 'txt'],
+    ['CVaR 95% (1j)', pp(sf.cvar95), pp(sb.cvar95), null, 'txt'],
+  ];
+  let shtml = `<table><tr><th>Statistique</th><th>${fundLabel}</th><th>${benchLabel}</th><th>Écart</th></tr>`;
+  rows.forEach(([label, fv, bv, diff, kind]) => {
+    let diffCell = '—', diffCls = '';
+    if (diff != null && kind !== 'txt') {
+      if (kind === 'pct') { diffCell = fmtPct(diff); diffCls = pctClass(diff); }
+      else { diffCell = (diff >= 0 ? '+' : '') + diff.toFixed(3); diffCls = pctClass(diff); }
+    }
+    const cls = v => { const num = parseFloat(String(v).replace(/[+%]/g, '')); return (!isNaN(num) && String(v).includes('%')) ? pctClass(num) : ''; };
+    shtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${label}</td>` +
+      `<td class="${cls(fv)}">${fv}</td><td class="${cls(bv)}">${bv}</td>` +
+      `<td class="${diffCls}">${diffCell}</td></tr>`;
+  });
+  shtml += '</table>';
+  document.getElementById('cmpStats').innerHTML = shtml;
+
+  // ---- Drawdown comparison chart ----
+  destroyChart('chartCompareDD');
+  STATE.charts['chartCompareDD'] = new Chart(document.getElementById('chartCompareDD'), {
+    type: 'line',
+    data: {
+      labels: al.dates.map(fmtDate),
+      datasets: [
+        { label: fundLabel, data: drawdownSeries(al.a).map(v => v * 100), borderColor: CMP_BLUE, backgroundColor: CMP_BLUE + '15', fill: true, borderWidth: 1.4, pointRadius: 0, tension: 0.1 },
+        { label: benchLabel, data: drawdownSeries(al.b).map(v => v * 100), borderColor: CMP_AMBER, backgroundColor: 'transparent', borderWidth: 1.4, pointRadius: 0, tension: 0.1 },
+      ]
+    },
     options: {
       ...chartOpts(''),
       scales: {

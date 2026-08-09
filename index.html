@@ -212,6 +212,21 @@ body {
   border-radius: 50%;
   background: var(--accent-blue);
 }
+.card-export { margin-left: auto; display: flex; gap: 6px; }
+.export-btn {
+  padding: 3px 9px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  text-transform: none;
+  transition: all 0.15s;
+}
+.export-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
 
 /* Grid layouts */
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
@@ -811,7 +826,7 @@ label.ctrl-label {
     </div>
     <div id="cmpPeriodInfo" class="ctrl-label" style="margin:-4px 0 4px;"></div>
     <div class="card">
-      <div class="card-title"><div class="dot"></div>Performance rebasée 100 (période sélectionnée)</div>
+      <div class="card-title"><div class="dot"></div>Performance rebasée 100 (période sélectionnée)<span class="card-export"><button class="export-btn" data-export="chartCompare" data-type="xlsx" data-label="Date" data-name="perf-rebasee-100">XLSX</button><button class="export-btn" data-export="chartCompare" data-type="jpeg" data-name="perf-rebasee-100">JPG</button></span></div>
       <div class="chart-container tall"><canvas id="chartCompare"></canvas></div>
     </div>
     <div class="grid-2">
@@ -829,7 +844,7 @@ label.ctrl-label {
       <div class="table-wrap" id="cmpStats"></div>
     </div>
     <div class="card">
-      <div class="card-title"><div class="dot"></div>Drawdown comparé</div>
+      <div class="card-title"><div class="dot"></div>Drawdown comparé<span class="card-export"><button class="export-btn" data-export="chartCompareDD" data-type="xlsx" data-label="Date" data-name="drawdown-compare">XLSX</button><button class="export-btn" data-export="chartCompareDD" data-type="jpeg" data-name="drawdown-compare">JPG</button></span></div>
       <div class="chart-container tall"><canvas id="chartCompareDD"></canvas></div>
     </div>
     <div class="controls">
@@ -843,16 +858,16 @@ label.ctrl-label {
     </div>
     <div class="grid-2">
       <div class="card">
-        <div class="card-title"><div class="dot"></div>Corrélation glissante (fonds vs benchmark)</div>
+        <div class="card-title"><div class="dot"></div>Corrélation glissante (fonds vs benchmark)<span class="card-export"><button class="export-btn" data-export="chartCompareCorr" data-type="xlsx" data-label="Date" data-name="correlation-glissante">XLSX</button><button class="export-btn" data-export="chartCompareCorr" data-type="jpeg" data-name="correlation-glissante">JPG</button></span></div>
         <div class="chart-container tall"><canvas id="chartCompareCorr"></canvas></div>
       </div>
       <div class="card">
-        <div class="card-title"><div class="dot"></div>Sharpe ratio glissant (annualisé)</div>
+        <div class="card-title"><div class="dot"></div>Sharpe ratio glissant (annualisé)<span class="card-export"><button class="export-btn" data-export="chartCompareSharpe" data-type="xlsx" data-label="Date" data-name="sharpe-glissant">XLSX</button><button class="export-btn" data-export="chartCompareSharpe" data-type="jpeg" data-name="sharpe-glissant">JPG</button></span></div>
         <div class="chart-container tall"><canvas id="chartCompareSharpe"></canvas></div>
       </div>
     </div>
     <div class="card">
-      <div class="card-title"><div class="dot"></div>Superposition de deux périodes</div>
+      <div class="card-title"><div class="dot"></div>Superposition de deux périodes<span class="card-export"><button class="export-btn" data-export="chartCompareOverlay" data-type="xlsx" data-label="Jour" data-name="superposition-periodes">XLSX</button><button class="export-btn" data-export="chartCompareOverlay" data-type="jpeg" data-name="superposition-periodes">JPG</button></span></div>
       <div class="controls" style="flex-wrap:wrap;gap:16px;align-items:flex-end;">
         <div style="display:flex;flex-direction:column;gap:4px;">
           <label class="ctrl-label">Série</label>
@@ -2669,7 +2684,46 @@ function cmpWireBar() {
     STATE.compare.ovl = { series: (STATE.compare.ovl && STATE.compare.ovl.series) || 'fund' };
     renderCompare();
   });
+  // Per-chart export (XLSX data / JPG image), delegated.
+  const tabEl = document.getElementById('tab-compare');
+  if (tabEl) tabEl.addEventListener('click', e => {
+    const btn = e.target.closest('.export-btn'); if (!btn) return;
+    const id = btn.dataset.export, name = btn.dataset.name || id;
+    if (!STATE.charts[id]) { alert('Graphique non disponible — chargez les données d\'abord.'); return; }
+    if (btn.dataset.type === 'jpeg') exportChartImage(id, name);
+    else exportChartData(id, btn.dataset.label || 'Date', name);
+  });
   STATE._cmpBarWired = true;
+}
+
+function triggerDownload(url, name) {
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+// JPG export: composite the (transparent) chart canvas over the card
+// background so the image isn't a black rectangle.
+function exportChartImage(chartId, name) {
+  const src = document.getElementById(chartId); if (!src) return;
+  const tmp = document.createElement('canvas');
+  tmp.width = src.width; tmp.height = src.height;
+  const ctx = tmp.getContext('2d');
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg-card').trim() || '#151922';
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, tmp.width, tmp.height);
+  ctx.drawImage(src, 0, 0);
+  triggerDownload(tmp.toDataURL('image/jpeg', 0.95), name + '.jpg');
+}
+// XLSX export: the chart's underlying data (labels + one column per series).
+function exportChartData(chartId, labelHeader, name) {
+  const ch = STATE.charts[chartId]; if (!ch) return;
+  const labels = ch.data.labels || [], ds = ch.data.datasets;
+  const rows = [[labelHeader, ...ds.map(d => d.label)]];
+  for (let i = 0; i < labels.length; i++)
+    rows.push([labels[i], ...ds.map(d => { const v = d.data[i]; return v == null ? '' : v; })]);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Donnees');
+  XLSX.writeFile(wb, name + '.xlsx');
 }
 
 const CMP_BLUE = '#4d8eff', CMP_AMBER = '#ffb84d';

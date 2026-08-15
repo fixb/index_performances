@@ -649,6 +649,7 @@ label.ctrl-label {
   <button class="tab-btn" data-tab="rolling">Glissant</button>
   <button class="tab-btn" data-tab="stats">Statistiques</button>
   <button class="tab-btn" data-tab="compare">Fonds vs Benchmark</button>
+  <button class="tab-btn" data-tab="convex">Convexité</button>
   <button class="tab-btn" data-tab="correl">Corrélations & Betas</button>
   <button class="tab-btn" data-tab="ranking">Rankings</button>
 </nav>
@@ -892,6 +893,78 @@ label.ctrl-label {
     </div>
   </div>
 
+  <!-- CONVEXITY / CAPTURE TAB -->
+  <div class="tab-content" id="tab-convex">
+    <div class="controls" style="flex-wrap:wrap;gap:16px;align-items:flex-end;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Fonds / Série</label>
+        <select id="cvxFund" style="min-width:220px;"></select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Benchmark</label>
+        <select id="cvxBench" style="min-width:220px;"></select>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Fréquence</label>
+        <select id="cvxFreq">
+          <option value="daily">Quotidienne</option>
+          <option value="weekly">Hebdomadaire</option>
+          <option value="monthly" selected>Mensuelle</option>
+          <option value="quarterly">Trimestrielle</option>
+        </select>
+      </div>
+    </div>
+    <div class="cmp-period-bar" id="cvxPeriodBar">
+      <div class="cmp-presets">
+        <button class="ctrl-btn cmp-preset active" data-preset="max">Max</button>
+        <button class="ctrl-btn cmp-preset" data-preset="10">10A</button>
+        <button class="ctrl-btn cmp-preset" data-preset="5">5A</button>
+        <button class="ctrl-btn cmp-preset" data-preset="3">3A</button>
+        <button class="ctrl-btn cmp-preset" data-preset="1">1A</button>
+        <button class="ctrl-btn cmp-preset" data-preset="ytd">YTD</button>
+      </div>
+      <div class="date-input-group">
+        <input type="date" id="cvxDateStart">
+        <span class="date-sep">→</span>
+        <input type="date" id="cvxDateEnd">
+      </div>
+    </div>
+    <div id="cvxPeriodInfo" class="ctrl-label" style="margin:-4px 0 4px;"></div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Participation à la hausse / à la baisse</div>
+        <div class="table-wrap" id="cvxCapture"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Convexité (régression quadratique)</div>
+        <div class="table-wrap" id="cvxConvex"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Nuage de points fonds vs benchmark (droite + ajustement quadratique)</div>
+      <div class="chart-container tall"><canvas id="chartConvexScatter"></canvas></div>
+      <div id="cvxScatterNote" class="ctrl-label" style="margin-top:8px;"></div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Performance moyenne par quintile de marché</div>
+        <div class="chart-container tall"><canvas id="chartConvexBuckets"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>Participation par quintile de marché</div>
+        <div class="table-wrap" id="cvxBuckets"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>Capture haussière / baissière glissante</div>
+      <div class="controls">
+        <label class="ctrl-label">Fenêtre glissante:</label>
+        <select id="cvxRollWin"></select>
+      </div>
+      <div class="chart-container tall"><canvas id="chartConvexRolling"></canvas></div>
+    </div>
+  </div>
+
   <!-- CORRELATIONS TAB -->
   <div class="tab-content" id="tab-correl">
     <div class="file-selector" id="correlFileSelector"></div>
@@ -991,7 +1064,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     // Show/hide date bar
     const dateBar = document.getElementById('dateBar');
-    if (btn.dataset.tab === 'upload' || btn.dataset.tab === 'compare' || !STATE.activeDataset) {
+    if (btn.dataset.tab === 'upload' || btn.dataset.tab === 'compare'
+        || btn.dataset.tab === 'convex' || !STATE.activeDataset) {
       dateBar.classList.remove('visible');
     } else {
       dateBar.classList.add('visible');
@@ -1003,6 +1077,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 function refreshTab(tab) {
   if (!STATE.activeDataset) return;
   if (tab === 'compare') { renderCompare(); injectExportButtons(); return; }
+  if (tab === 'convex') { renderConvex(); injectExportButtons(); return; }
   const d = getFilteredDataset();
   if (!d || d.dates.length < 2) return;
   switch(tab) {
@@ -1181,6 +1256,9 @@ function updateUI() {
 
   // Fund vs benchmark comparison selectors
   populateCompareSelectors();
+
+  // Convexity / capture selectors
+  populateConvexSelectors();
 
   // Init date bar
   initDateBar();
@@ -3134,6 +3212,482 @@ function renderOverlay(alFull, fundLabel, benchLabel) {
       }
     }
   });
+}
+
+// ============================================================
+// CONVEXITY & UP/DOWN CAPTURE TAB
+// ============================================================
+// Mesure l'asymétrie du profil de rendement d'une série vs son benchmark :
+// participation à la hausse / à la baisse (capture ratios), beta conditionnel
+// et convexité (terme quadratique de la régression fonds ~ benchmark).
+
+const CVX_ROLL_OPTS = {
+  daily:     [[63, '3 Mois (63j)'], [126, '6 Mois (126j)'], [252, '1 An (252j)'], [504, '2 Ans (504j)']],
+  weekly:    [[13, '3 Mois (13s)'], [26, '6 Mois (26s)'], [52, '1 An (52s)'], [104, '2 Ans (104s)']],
+  monthly:   [[12, '1 An (12m)'], [24, '2 Ans (24m)'], [36, '3 Ans (36m)'], [60, '5 Ans (60m)']],
+  quarterly: [[8, '2 Ans (8t)'], [12, '3 Ans (12t)'], [20, '5 Ans (20t)']],
+};
+const CVX_ROLL_DEFAULT = { daily: 252, weekly: 52, monthly: 36, quarterly: 12 };
+const CVX_FREQ_LABEL = { daily: 'quotidiennes', weekly: 'hebdomadaires', monthly: 'mensuelles', quarterly: 'trimestrielles' };
+
+function populateConvexSelectors() {
+  const fundSel = document.getElementById('cvxFund');
+  const benchSel = document.getElementById('cvxBench');
+  if (!fundSel || !benchSel) return;
+  const uni = reportUniverse();
+  if (!uni.length) { fundSel.innerHTML = benchSel.innerHTML = ''; return; }
+  const cols = new Set(uni.map(u => u.col));
+
+  const st = STATE.convex = STATE.convex || {};
+  if (!st.freq) st.freq = 'monthly';
+  // Par défaut : la dernière série chargée (typiquement le fichier que
+  // l'utilisateur vient d'uploader) face au premier indice "global".
+  // Tant que l'utilisateur n'a pas choisi lui-même, on cible la dernière série
+  // chargée (le track record qu'il vient d'uploader) face à un indice global.
+  if (!st.userFund || !cols.has(st.fund)) st.fund = uni[uni.length - 1].col;
+  if (!st.userBench || !cols.has(st.bench) || st.bench === st.fund) {
+    const pool = uni.filter(u => u.col !== st.fund);
+    const cmpB = (STATE.compare && pool.some(u => u.col === STATE.compare.bench)) ? STATE.compare.bench : '';
+    st.bench = pickSeries(pool, [/global/i, /hedged/i])
+      || pickSeries(pool, [/global/i], [/parity/i])
+      || cmpB
+      || (pool[0] || uni[0]).col;
+  }
+
+  const opt = sel => uni.map(u => {
+    const label = `${u.col.trim()} — ${shortName(u.dataset)}`;
+    return `<option value="${u.col.replace(/"/g, '&quot;')}"${u.col === sel ? ' selected' : ''}>${label}</option>`;
+  }).join('');
+  fundSel.innerHTML = opt(st.fund);
+  benchSel.innerHTML = opt(st.bench);
+  document.getElementById('cvxFreq').value = st.freq;
+  cvxBuildRollOptions();
+  cvxWireBar();
+
+  fundSel.onchange = e => { st.fund = e.target.value; st.userFund = true; renderConvex(); };
+  benchSel.onchange = e => { st.bench = e.target.value; st.userBench = true; renderConvex(); };
+}
+
+function cvxBuildRollOptions() {
+  const st = STATE.convex, sel = document.getElementById('cvxRollWin');
+  if (!sel) return;
+  const opts = CVX_ROLL_OPTS[st.freq] || CVX_ROLL_OPTS.monthly;
+  if (!opts.some(o => o[0] === st.rollWin)) st.rollWin = CVX_ROLL_DEFAULT[st.freq];
+  sel.innerHTML = opts.map(([v, l]) =>
+    `<option value="${v}"${v === st.rollWin ? ' selected' : ''}>${l}</option>`).join('');
+}
+
+function cvxWireBar() {
+  if (STATE._cvxBarWired) return;
+  const st = () => (STATE.convex = STATE.convex || {});
+  document.querySelectorAll('#cvxPeriodBar .cmp-preset').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.preset;
+      const ds = _cvxAlignedDates;
+      if (!ds || !ds.length) return;
+      const last = ds[ds.length - 1];
+      let start = null;
+      if (p === 'ytd') start = new Date(last.getFullYear(), 0, 1);
+      else if (p !== 'max') { start = new Date(last); start.setFullYear(start.getFullYear() - parseInt(p)); }
+      st().range = { start: start ? start.getTime() : null, end: null };
+      document.querySelectorAll('#cvxPeriodBar .cmp-preset').forEach(b =>
+        b.classList.toggle('active', b.dataset.preset === p));
+      renderConvex();
+    }));
+  const applyDates = () => {
+    const sd = cmpParseLocal(document.getElementById('cvxDateStart').value);
+    const ed = cmpParseLocal(document.getElementById('cvxDateEnd').value);
+    st().range = { start: sd ? sd.getTime() : null, end: ed ? ed.getTime() : null };
+    document.querySelectorAll('#cvxPeriodBar .cmp-preset').forEach(b => b.classList.remove('active'));
+    renderConvex();
+  };
+  ['cvxDateStart', 'cvxDateEnd'].forEach(id =>
+    document.getElementById(id).addEventListener('change', applyDates));
+  document.getElementById('cvxFreq').addEventListener('change', e => {
+    st().freq = e.target.value;
+    cvxBuildRollOptions();
+    renderConvex();
+  });
+  document.getElementById('cvxRollWin').addEventListener('change', e => {
+    st().rollWin = parseInt(e.target.value);
+    renderConvex();
+  });
+  STATE._cvxBarWired = true;
+}
+
+let _cvxAlignedDates = null;
+
+// Rendements périodiques (fonds & benchmark) sur un couple de séries alignées.
+function cvxPeriodicPairs(dates, pa, pb, freq) {
+  const ra = getPeriodicReturns(dates, pa, freq);
+  const rb = getPeriodicReturns(dates, pb, freq);
+  const n = Math.min(ra.length, rb.length);
+  const out = { labels: [], f: [], b: [] };
+  for (let i = 0; i < n; i++) {
+    if (!isFinite(ra[i].ret) || !isFinite(rb[i].ret)) continue;
+    out.labels.push(ra[i].period);
+    out.f.push(ra[i].ret * 100);
+    out.b.push(rb[i].ret * 100);
+  }
+  return out;
+}
+
+// Capture ratios sur un échantillon de rendements en % (composé et arithmétique).
+function captureRatios(f, b) {
+  let upF = 1, upB = 1, dnF = 1, dnB = 1;
+  const upFs = [], upBs = [], dnFs = [], dnBs = [];
+  let upWin = 0, dnWin = 0;
+  for (let i = 0; i < b.length; i++) {
+    if (b[i] > 0) {
+      upF *= 1 + f[i] / 100; upB *= 1 + b[i] / 100;
+      upFs.push(f[i]); upBs.push(b[i]);
+      if (f[i] > 0) upWin++;
+    } else if (b[i] < 0) {
+      dnF *= 1 + f[i] / 100; dnB *= 1 + b[i] / 100;
+      dnFs.push(f[i]); dnBs.push(b[i]);
+      if (f[i] > b[i]) dnWin++;
+    }
+  }
+  const ratio = (num, den) => (den !== 0 && isFinite(den)) ? num / den * 100 : null;
+  return {
+    nUp: upFs.length, nDn: dnFs.length,
+    upCapC: upFs.length ? ratio(upF - 1, upB - 1) : null,
+    dnCapC: dnFs.length ? ratio(dnF - 1, dnB - 1) : null,
+    upCapM: upFs.length ? ratio(mean(upFs), mean(upBs)) : null,
+    dnCapM: dnFs.length ? ratio(mean(dnFs), mean(dnBs)) : null,
+    betaUp: upFs.length > 2 ? beta(upFs, upBs) : null,
+    betaDn: dnFs.length > 2 ? beta(dnFs, dnBs) : null,
+    avgUpF: upFs.length ? mean(upFs) : null, avgUpB: upBs.length ? mean(upBs) : null,
+    avgDnF: dnFs.length ? mean(dnFs) : null, avgDnB: dnBs.length ? mean(dnBs) : null,
+    battingUp: upFs.length ? upWin / upFs.length * 100 : null,
+    battingDn: dnFs.length ? dnWin / dnFs.length * 100 : null,
+  };
+}
+
+// Régression y = a + b·x + c·x² par équations normales (élimination de Gauss 3×3).
+function quadFit(x, y) {
+  const n = x.length;
+  if (n < 4) return null;
+  let s1 = 0, s2 = 0, s3 = 0, s4 = 0, sy = 0, sxy = 0, sx2y = 0;
+  for (let i = 0; i < n; i++) {
+    const xi = x[i], x2 = xi * xi;
+    s1 += xi; s2 += x2; s3 += x2 * xi; s4 += x2 * x2;
+    sy += y[i]; sxy += xi * y[i]; sx2y += x2 * y[i];
+  }
+  const M = [[n, s1, s2, sy], [s1, s2, s3, sxy], [s2, s3, s4, sx2y]];
+  for (let col = 0; col < 3; col++) {
+    let piv = col;
+    for (let r = col + 1; r < 3; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    if (Math.abs(M[piv][col]) < 1e-12) return null;
+    [M[col], M[piv]] = [M[piv], M[col]];
+    for (let r = 0; r < 3; r++) {
+      if (r === col) continue;
+      const k = M[r][col] / M[col][col];
+      for (let c = col; c < 4; c++) M[r][c] -= k * M[col][c];
+    }
+  }
+  const a = M[0][3] / M[0][0], b = M[1][3] / M[1][1], c = M[2][3] / M[2][2];
+  const ybar = sy / n;
+  let ssRes = 0, ssTot = 0, sr2 = 0;
+  for (let i = 0; i < n; i++) {
+    const pred = a + b * x[i] + c * x[i] * x[i];
+    ssRes += (y[i] - pred) ** 2;
+    ssTot += (y[i] - ybar) ** 2;
+  }
+  // Erreur-type de c : sigma² · [(XᵀX)⁻¹]₃₃, approximée par la variance de x²
+  // résiduelle après projection sur (1, x).
+  const x2 = x.map(v => v * v);
+  const bx2 = beta(x2, x), mx2 = mean(x2), mx = mean(x);
+  for (let i = 0; i < n; i++) sr2 += (x2[i] - mx2 - bx2 * (x[i] - mx)) ** 2;
+  const seC = (n > 3 && sr2 > 0) ? Math.sqrt((ssRes / (n - 3)) / sr2) : null;
+  return { a, b, c, r2: ssTot > 0 ? 1 - ssRes / ssTot : null, tC: seC ? c / seC : null, n };
+}
+
+function renderConvex() {
+  const info = document.getElementById('cvxPeriodInfo');
+  const clear = msg => {
+    if (info) info.textContent = msg || '';
+    ['cvxCapture', 'cvxConvex', 'cvxBuckets'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+    const note = document.getElementById('cvxScatterNote'); if (note) note.textContent = '';
+    ['chartConvexScatter', 'chartConvexBuckets', 'chartConvexRolling'].forEach(destroyChart);
+  };
+
+  const st = STATE.convex = STATE.convex || {};
+  if (!st.freq) st.freq = 'monthly';
+  const fund = seriesFor(st.fund), bench = seriesFor(st.bench);
+  if (!fund || !bench) { clear('Chargez au moins deux séries (fonds + benchmark).'); return; }
+  if (fund.name === bench.name) { clear('Sélectionnez deux séries différentes.'); return; }
+
+  const alFull = alignSeries(fund, bench);
+  if (alFull.dates.length < 5) { clear('Pas de période commune suffisante entre ces deux séries.'); return; }
+
+  cvxWireBar();
+  _cvxAlignedDates = alFull.dates;
+
+  // Sous-période sélectionnée
+  const N = alFull.dates.length;
+  let si = 0, ei = N - 1;
+  const rg = st.range;
+  if (rg) {
+    if (rg.start != null) si = cmpFirstIdxGE(alFull.dates, rg.start);
+    if (rg.end != null) ei = cmpLastIdxLE(alFull.dates, rg.end);
+  }
+  if (si < 0) si = 0;
+  if (ei > N - 1 || ei < 0) ei = N - 1;
+  if (si >= ei) { si = 0; ei = N - 1; }
+
+  const dates = alFull.dates.slice(si, ei + 1);
+  const pa = alFull.a.slice(si, ei + 1);
+  const pb = alFull.b.slice(si, ei + 1);
+  const dStart = document.getElementById('cvxDateStart'), dEnd = document.getElementById('cvxDateEnd');
+  dStart.min = dEnd.min = fmtDate(alFull.dates[0]);
+  dStart.max = dEnd.max = fmtDate(alFull.dates[N - 1]);
+  dStart.value = fmtDate(dates[0]); dEnd.value = fmtDate(dates[dates.length - 1]);
+
+  const fundLabel = fund.name.trim(), benchLabel = bench.name.trim();
+  const pairs = cvxPeriodicPairs(dates, pa, pb, st.freq);
+  const f = pairs.f, b = pairs.b, m = f.length;
+  if (m < 6) {
+    clear(`Échantillon trop court : ${m} obs. ${CVX_FREQ_LABEL[st.freq]} — élargissez la période ou choisissez une fréquence plus fine.`);
+    return;
+  }
+
+  const cap = captureRatios(f, b);
+  if (info) info.textContent =
+    `Sélection : ${fmtDate(dates[0])} → ${fmtDate(dates[dates.length - 1])} · ` +
+    `${m} périodes ${CVX_FREQ_LABEL[st.freq]} (${cap.nUp} de hausse, ${cap.nDn} de baisse) · ` +
+    `commun total : ${fmtDate(alFull.dates[0])} → ${fmtDate(alFull.dates[N - 1])}`;
+
+  // ---- Table participation hausse / baisse ----
+  const p1 = v => v == null ? '—' : v.toFixed(1) + '%';
+  const p2 = v => v == null ? '—' : fmtPct(v);
+  const r3 = v => v == null ? '—' : v.toFixed(3);
+  const spread = (cap.upCapM != null && cap.dnCapM != null) ? cap.upCapM - cap.dnCapM : null;
+  const capRatio = (cap.upCapM != null && cap.dnCapM != null && cap.dnCapM !== 0) ? cap.upCapM / cap.dnCapM : null;
+  const betaAsym = (cap.betaUp != null && cap.betaDn != null) ? cap.betaUp - cap.betaDn : null;
+  // La capture composée (convention Morningstar) n'a de sens qu'en basse
+  // fréquence : cumulée sur des centaines de jours de même signe, elle diverge.
+  const compOK = st.freq === 'monthly' || st.freq === 'quarterly';
+  const capRows = [
+    ['Périodes de hausse du benchmark', String(cap.nUp), ''],
+    ['Périodes de baisse du benchmark', String(cap.nDn), ''],
+    ['Participation à la hausse', p1(cap.upCapM), 'up'],
+    ['Participation à la baisse', p1(cap.dnCapM), 'dn'],
+    ['Écart de capture (hausse − baisse)', spread == null ? '—' : (spread >= 0 ? '+' : '') + spread.toFixed(1) + ' pp', 'pos'],
+    ['Ratio de capture (hausse / baisse)', capRatio == null ? '—' : capRatio.toFixed(2) + 'x', 'ratio'],
+    ['Participation à la hausse (composée)', compOK ? p1(cap.upCapC) : 'n/a (fréquence trop fine)', compOK ? 'up' : ''],
+    ['Participation à la baisse (composée)', compOK ? p1(cap.dnCapC) : 'n/a (fréquence trop fine)', compOK ? 'dn' : ''],
+    ['Beta haussier (β↑)', r3(cap.betaUp), ''],
+    ['Beta baissier (β↓)', r3(cap.betaDn), ''],
+    ['Asymétrie de beta (β↑ − β↓)', betaAsym == null ? '—' : (betaAsym >= 0 ? '+' : '') + betaAsym.toFixed(3), 'pos'],
+    ['Perf. moyenne quand le marché monte', p2(cap.avgUpF) + ' vs ' + p2(cap.avgUpB), ''],
+    ['Perf. moyenne quand le marché baisse', p2(cap.avgDnF) + ' vs ' + p2(cap.avgDnB), ''],
+    ['% de hausses où le fonds progresse', p1(cap.battingUp), ''],
+    ['% de baisses où le fonds résiste mieux', p1(cap.battingDn), ''],
+  ];
+  let capHtml = '<table><tr><th>Mesure</th><th>Valeur</th></tr>';
+  capRows.forEach(([label, val, kind]) => {
+    let cls = '';
+    const num = parseFloat(String(val).replace(/[+%x]|\s?pp/g, ''));
+    if (!isNaN(num)) {
+      if (kind === 'up') cls = pctClass(num - 100);        // >100% de capture haussière = favorable
+      else if (kind === 'dn') cls = pctClass(100 - num);   // <100% de capture baissière = favorable
+      else if (kind === 'pos') cls = pctClass(num);
+      else if (kind === 'ratio') cls = pctClass(num - 1);
+    }
+    capHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${label}</td><td class="${cls}">${val}</td></tr>`;
+  });
+  capHtml += '</table>';
+  capHtml += `<div class="ctrl-label" style="margin-top:10px;line-height:1.5;">` +
+    `Participation = rendement moyen du fonds ÷ rendement moyen du benchmark, sur les seules périodes de hausse (resp. de baisse) du benchmark. ` +
+    `Un profil défensif recherche &gt; 100% à la hausse et &lt; 100% à la baisse. ` +
+    `La variante composée (convention Morningstar) chaîne les rendements de chaque camp : elle n'est affichée qu'en fréquence mensuelle ou trimestrielle.</div>`;
+  document.getElementById('cvxCapture').innerHTML = capHtml;
+
+  // ---- Régression quadratique (convexité) ----
+  const q = quadFit(b, f);
+  const lin = { beta: beta(f, b), alpha: mean(f) - beta(f, b) * mean(b) };
+  const corr = correlation(f, b);
+  const perYear = { daily: 252, weekly: 52, monthly: 12, quarterly: 4 }[st.freq];
+  let convHtml = '<table><tr><th>Mesure</th><th>Valeur</th></tr>';
+  const cvRow = (label, val, cls = '') =>
+    convHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${label}</td><td class="${cls}">${val}</td></tr>`;
+  cvRow('Beta linéaire', r3(lin.beta));
+  cvRow('Alpha par période', fmtPct(lin.alpha, 3), pctClass(lin.alpha));
+  cvRow('Alpha annualisé (approx.)', fmtPct(lin.alpha * perYear), pctClass(lin.alpha * perYear));
+  cvRow('R² (linéaire)', (corr * corr).toFixed(3));
+  if (q) {
+    cvRow('Convexité (coeff. quadratique c)', (q.c >= 0 ? '+' : '') + q.c.toFixed(4), pctClass(q.c));
+    cvRow('t-stat de c', q.tC == null ? '—' : q.tC.toFixed(2),
+      q.tC != null && Math.abs(q.tC) >= 1.96 ? pctClass(q.tC) : '');
+    cvRow('R² (quadratique)', q.r2 == null ? '—' : q.r2.toFixed(3));
+    cvRow('Beta au point milieu (b)', q.b.toFixed(3));
+    cvRow('Beta à −5% de marché', (q.b + 2 * q.c * -5).toFixed(3));
+    cvRow('Beta à +5% de marché', (q.b + 2 * q.c * 5).toFixed(3));
+    const signif = q.tC != null && Math.abs(q.tC) >= 1.96;
+    const verdict = q.c > 0
+      ? (signif ? 'Convexe (significatif)' : 'Convexe (non significatif)')
+      : (signif ? 'Concave (significatif)' : 'Concave (non significatif)');
+    cvRow('Profil', verdict, pctClass(q.c));
+  } else {
+    cvRow('Convexité', 'échantillon insuffisant');
+  }
+  convHtml += '</table>';
+  document.getElementById('cvxConvex').innerHTML = convHtml;
+
+  // ---- Nuage de points + ajustements ----
+  destroyChart('chartConvexScatter');
+  const xMin = Math.min(...b), xMax = Math.max(...b);
+  const grid = Array.from({ length: 60 }, (_, i) => xMin + (xMax - xMin) * i / 59);
+  const scatterSets = [
+    {
+      type: 'scatter', label: `${fundLabel} vs ${benchLabel}`,
+      data: b.map((x, i) => ({ x, y: f[i] })),
+      backgroundColor: CMP_BLUE + 'aa', borderColor: CMP_BLUE, pointRadius: 3, pointHoverRadius: 5,
+    },
+    {
+      type: 'line', label: 'Ajustement linéaire',
+      data: grid.map(x => ({ x, y: lin.alpha + lin.beta * x })),
+      borderColor: CMP_AMBER, borderWidth: 1.6, pointRadius: 0, borderDash: [5, 4], fill: false, tension: 0,
+    },
+  ];
+  if (q) scatterSets.push({
+    type: 'line', label: 'Ajustement quadratique',
+    data: grid.map(x => ({ x, y: q.a + q.b * x + q.c * x * x })),
+    borderColor: '#00e19a', borderWidth: 2, pointRadius: 0, fill: false, tension: 0,
+  });
+  STATE.charts['chartConvexScatter'] = new Chart(document.getElementById('chartConvexScatter'), {
+    data: { datasets: scatterSets },
+    options: {
+      ...chartOpts(''),
+      interaction: { intersect: false, mode: 'nearest' },
+      plugins: {
+        ...chartOpts('').plugins,
+        tooltip: {
+          ...chartOpts('').plugins.tooltip,
+          callbacks: {
+            label: ctx => `${benchLabel}: ${ctx.parsed.x.toFixed(2)}% → ${fundLabel}: ${ctx.parsed.y.toFixed(2)}%`
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          title: { display: true, text: `${benchLabel} (%, ${CVX_FREQ_LABEL[st.freq]})`, color: '#8b92a5', font: { size: 11 } },
+          ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
+          grid: { color: 'rgba(37,42,54,0.5)' },
+        },
+        y: {
+          title: { display: true, text: `${fundLabel} (%)`, color: '#8b92a5', font: { size: 11 } },
+          ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
+          grid: { color: 'rgba(37,42,54,0.5)' },
+        }
+      }
+    }
+  });
+  const note = document.getElementById('cvxScatterNote');
+  if (note) {
+    note.textContent = q
+      ? `c = ${q.c.toFixed(4)} : ${q.c > 0
+          ? 'la pente augmente avec le marché — le fonds capte davantage la hausse que la baisse (convexité positive).'
+          : 'la pente diminue avec le marché — le fonds subit davantage la baisse que la hausse (concavité).'}` +
+        ` Beta local = b + 2c·x, soit ${(q.b + 2 * q.c * -5).toFixed(2)} à −5% et ${(q.b + 2 * q.c * 5).toFixed(2)} à +5% de marché.`
+      : '';
+  }
+
+  // ---- Quintiles de marché ----
+  const order = b.map((v, i) => i).sort((i, j) => b[i] - b[j]);
+  const NB = 5;
+  const buckets = [];
+  for (let k = 0; k < NB; k++) {
+    const lo = Math.floor(k * order.length / NB), hi = Math.floor((k + 1) * order.length / NB);
+    const idx = order.slice(lo, hi);
+    if (!idx.length) continue;
+    const bs = idx.map(i => b[i]), fs = idx.map(i => f[i]);
+    const mb = mean(bs), mf = mean(fs);
+    buckets.push({
+      label: `Q${k + 1}`,
+      range: `${bs[0].toFixed(1)}% → ${bs[bs.length - 1].toFixed(1)}%`,
+      n: idx.length, mb, mf,
+      part: mb !== 0 ? mf / mb * 100 : null,
+      hit: fs.filter((v, i) => v > bs[i]).length / idx.length * 100,
+    });
+  }
+  let bHtml = '<table><tr><th>Quintile</th><th>Plage benchmark</th><th>n</th><th>Moy. bench</th><th>Moy. fonds</th><th>Participation</th><th>% surperf.</th></tr>';
+  buckets.forEach(bk => {
+    // Participation favorable : >100% dans les quintiles haussiers, <100% dans les baissiers.
+    const good = bk.part == null ? 0 : (bk.mb >= 0 ? bk.part - 100 : 100 - bk.part);
+    bHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${bk.label}</td>` +
+      `<td>${bk.range}</td><td>${bk.n}</td>` +
+      `<td class="${pctClass(bk.mb)}">${fmtPct(bk.mb)}</td>` +
+      `<td class="${pctClass(bk.mf)}">${fmtPct(bk.mf)}</td>` +
+      `<td class="${pctClass(good)}">${bk.part == null ? '—' : bk.part.toFixed(1) + '%'}</td>` +
+      `<td>${bk.hit.toFixed(0)}%</td></tr>`;
+  });
+  bHtml += '</table>';
+  document.getElementById('cvxBuckets').innerHTML = bHtml;
+
+  destroyChart('chartConvexBuckets');
+  STATE.charts['chartConvexBuckets'] = new Chart(document.getElementById('chartConvexBuckets'), {
+    type: 'bar',
+    data: {
+      labels: buckets.map(bk => `${bk.label} (${bk.range})`),
+      datasets: [
+        { label: benchLabel, data: buckets.map(bk => bk.mb), backgroundColor: CMP_AMBER + 'cc', borderWidth: 0 },
+        { label: fundLabel, data: buckets.map(bk => bk.mf), backgroundColor: CMP_BLUE + 'cc', borderWidth: 0 },
+      ]
+    },
+    options: {
+      ...chartOpts(''),
+      scales: {
+        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 } }, grid: { display: false } },
+        y: {
+          title: { display: true, text: `Rendement moyen (%, ${CVX_FREQ_LABEL[st.freq]})`, color: '#8b92a5', font: { size: 11 } },
+          ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
+          grid: { color: 'rgba(37,42,54,0.5)' },
+        }
+      }
+    }
+  });
+
+  // ---- Capture glissante ----
+  destroyChart('chartConvexRolling');
+  const win = st.rollWin || CVX_ROLL_DEFAULT[st.freq];
+  const rollLabels = [], rollUp = [], rollDn = [];
+  if (m >= win) {
+    for (let i = win - 1; i < m; i++) {
+      const wf = f.slice(i - win + 1, i + 1), wb = b.slice(i - win + 1, i + 1);
+      const c = captureRatios(wf, wb);
+      rollLabels.push(pairs.labels[i]);
+      rollUp.push(c.nUp >= 3 ? c.upCapM : null);
+      rollDn.push(c.nDn >= 3 ? c.dnCapM : null);
+    }
+  }
+  if (rollLabels.length) {
+    STATE.charts['chartConvexRolling'] = new Chart(document.getElementById('chartConvexRolling'), {
+      type: 'line',
+      data: {
+        labels: rollLabels,
+        datasets: [
+          { label: 'Participation à la hausse (%)', data: rollUp, borderColor: '#00e19a', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1, spanGaps: true },
+          { label: 'Participation à la baisse (%)', data: rollDn, borderColor: '#ff4d6a', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1, spanGaps: true },
+        ]
+      },
+      options: {
+        ...chartOpts(''),
+        scales: {
+          x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
+          y: {
+            title: { display: true, text: `Capture sur ${win} périodes (%)`, color: '#8b92a5', font: { size: 11 } },
+            ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
+            grid: { color: 'rgba(37,42,54,0.5)' },
+          }
+        }
+      }
+    });
+  }
 }
 
 // ============================================================

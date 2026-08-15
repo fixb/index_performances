@@ -929,6 +929,34 @@ label.ctrl-label {
         <input type="date" id="cvxDateEnd">
       </div>
     </div>
+    <div class="controls" style="flex-wrap:wrap;gap:16px;align-items:flex-end;">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <label class="ctrl-label">Comparer à</label>
+        <select id="cvxCmpMode" style="min-width:240px;">
+          <option value="none">— Aucune comparaison —</option>
+          <option value="period">Une autre période (mêmes séries)</option>
+          <option value="pair">Une autre relation (2 autres séries)</option>
+        </select>
+      </div>
+      <div id="cvxCmpPeriodBox" style="display:none;flex-direction:column;gap:4px;">
+        <label class="ctrl-label" style="color:var(--accent-purple)">Période B</label>
+        <div class="date-input-group">
+          <input type="date" id="cvxCmpStart">
+          <span class="date-sep">→</span>
+          <input type="date" id="cvxCmpEnd">
+        </div>
+      </div>
+      <div id="cvxCmpPairBox" style="display:none;gap:16px;align-items:flex-end;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label class="ctrl-label" style="color:var(--accent-purple)">Fonds (B)</label>
+          <select id="cvxCmpFund" style="min-width:200px;"></select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label class="ctrl-label" style="color:var(--accent-purple)">Benchmark (B)</label>
+          <select id="cvxCmpBench" style="min-width:200px;"></select>
+        </div>
+      </div>
+    </div>
     <div id="cvxPeriodInfo" class="ctrl-label" style="margin:-4px 0 4px;"></div>
     <div class="grid-2">
       <div class="card">
@@ -956,11 +984,19 @@ label.ctrl-label {
       </div>
     </div>
     <div class="card">
-      <div class="card-title"><div class="dot"></div>Capture haussière / baissière glissante</div>
-      <div class="controls">
+      <div class="card-title"><div class="dot"></div>Participation glissante</div>
+      <div class="controls" style="flex-wrap:wrap;">
+        <label class="ctrl-label">Mesure:</label>
+        <select id="cvxRollMetric">
+          <option value="capture">Participation hausse / baisse</option>
+          <option value="spread">Écart de participation (hausse − baisse)</option>
+          <option value="beta">Beta haussier / baissier</option>
+          <option value="convex">Convexité (coefficient c)</option>
+        </select>
         <label class="ctrl-label">Fenêtre glissante:</label>
         <select id="cvxRollWin"></select>
       </div>
+      <div id="cvxRollInfo" class="ctrl-label" style="margin:6px 0 4px;"></div>
       <div class="chart-container tall"><canvas id="chartConvexRolling"></canvas></div>
     </div>
   </div>
@@ -3240,8 +3276,7 @@ function populateConvexSelectors() {
 
   const st = STATE.convex = STATE.convex || {};
   if (!st.freq) st.freq = 'monthly';
-  // Par défaut : la dernière série chargée (typiquement le fichier que
-  // l'utilisateur vient d'uploader) face au premier indice "global".
+  if (!st.cmpMode) st.cmpMode = 'none';
   // Tant que l'utilisateur n'a pas choisi lui-même, on cible la dernière série
   // chargée (le track record qu'il vient d'uploader) face à un indice global.
   if (!st.userFund || !cols.has(st.fund)) st.fund = uni[uni.length - 1].col;
@@ -3260,12 +3295,40 @@ function populateConvexSelectors() {
   }).join('');
   fundSel.innerHTML = opt(st.fund);
   benchSel.innerHTML = opt(st.bench);
+
+  // Comparaison "autre relation" : par défaut une autre série face au même
+  // benchmark, ce qui répond à la question « laquelle est la plus convexe ? ».
+  if (!cols.has(st.cmpFund) || st.cmpFund === st.bench) {
+    st.cmpFund = (uni.find(u => u.col !== st.fund && u.col !== st.bench) || uni[0]).col;
+  }
+  if (!cols.has(st.cmpBench) || st.cmpBench === st.cmpFund) {
+    st.cmpBench = st.bench !== st.cmpFund ? st.bench : (uni.find(u => u.col !== st.cmpFund) || uni[0]).col;
+  }
+  const cmpFundSel = document.getElementById('cvxCmpFund');
+  const cmpBenchSel = document.getElementById('cvxCmpBench');
+  cmpFundSel.innerHTML = opt(st.cmpFund);
+  cmpBenchSel.innerHTML = opt(st.cmpBench);
+  document.getElementById('cvxCmpMode').value = st.cmpMode;
   document.getElementById('cvxFreq').value = st.freq;
+  document.getElementById('cvxRollMetric').value = st.rollMetric || 'capture';
   cvxBuildRollOptions();
+  cvxSyncCmpBoxes();
   cvxWireBar();
 
   fundSel.onchange = e => { st.fund = e.target.value; st.userFund = true; renderConvex(); };
   benchSel.onchange = e => { st.bench = e.target.value; st.userBench = true; renderConvex(); };
+  cmpFundSel.onchange = e => { st.cmpFund = e.target.value; renderConvex(); };
+  cmpBenchSel.onchange = e => { st.cmpBench = e.target.value; renderConvex(); };
+}
+
+// Affiche le jeu de contrôles correspondant au mode de comparaison choisi.
+function cvxSyncCmpBoxes() {
+  const st = STATE.convex || {};
+  const per = document.getElementById('cvxCmpPeriodBox');
+  const pair = document.getElementById('cvxCmpPairBox');
+  if (!per || !pair) return;
+  per.style.display = st.cmpMode === 'period' ? 'flex' : 'none';
+  pair.style.display = st.cmpMode === 'pair' ? 'flex' : 'none';
 }
 
 function cvxBuildRollOptions() {
@@ -3312,6 +3375,23 @@ function cvxWireBar() {
     st().rollWin = parseInt(e.target.value);
     renderConvex();
   });
+  document.getElementById('cvxRollMetric').addEventListener('change', e => {
+    st().rollMetric = e.target.value;
+    renderConvex();
+  });
+  document.getElementById('cvxCmpMode').addEventListener('change', e => {
+    st().cmpMode = e.target.value;
+    cvxSyncCmpBoxes();
+    renderConvex();
+  });
+  const applyCmpDates = () => {
+    const sd = cmpParseLocal(document.getElementById('cvxCmpStart').value);
+    const ed = cmpParseLocal(document.getElementById('cvxCmpEnd').value);
+    st().cmpRange = { start: sd ? sd.getTime() : null, end: ed ? ed.getTime() : null };
+    renderConvex();
+  };
+  ['cvxCmpStart', 'cvxCmpEnd'].forEach(id =>
+    document.getElementById(id).addEventListener('change', applyCmpDates));
   STATE._cvxBarWired = true;
 }
 
@@ -3403,6 +3483,205 @@ function quadFit(x, y) {
   return { a, b, c, r2: ssTot > 0 ? 1 - ssRes / ssTot : null, tC: seC ? c / seC : null, n };
 }
 
+// Statistiques par quintile de marché (rendements en %).
+function cvxBucketStats(f, b, NB = 5) {
+  const order = b.map((v, i) => i).sort((i, j) => b[i] - b[j]);
+  const out = [];
+  for (let k = 0; k < NB; k++) {
+    const lo = Math.floor(k * order.length / NB), hi = Math.floor((k + 1) * order.length / NB);
+    const idx = order.slice(lo, hi);
+    if (!idx.length) continue;
+    const bs = idx.map(i => b[i]), fs = idx.map(i => f[i]);
+    const mb = mean(bs), mf = mean(fs);
+    out.push({
+      label: `Q${k + 1}`,
+      range: `${bs[0].toFixed(1)}% → ${bs[bs.length - 1].toFixed(1)}%`,
+      n: idx.length, mb, mf,
+      part: mb !== 0 ? mf / mb * 100 : null,
+      hit: fs.filter((v, i) => v > bs[i]).length / idx.length * 100,
+    });
+  }
+  return out;
+}
+
+// Analyse complète d'un couple (fonds, benchmark) sur une plage de dates.
+// Réutilisée à l'identique pour la relation de référence et sa comparaison.
+function cvxAnalyse(fundCol, benchCol, range, freq) {
+  const fund = seriesFor(fundCol), bench = seriesFor(benchCol);
+  if (!fund || !bench) return { err: 'Sélectionnez deux séries chargées.' };
+  if (fund.name === bench.name) return { err: 'Sélectionnez deux séries différentes.' };
+  const al = alignSeries(fund, bench);
+  if (al.dates.length < 5) return { err: 'Pas de période commune suffisante entre ces deux séries.' };
+
+  const N = al.dates.length;
+  let si = 0, ei = N - 1;
+  if (range) {
+    if (range.start != null) si = cmpFirstIdxGE(al.dates, range.start);
+    if (range.end != null) ei = cmpLastIdxLE(al.dates, range.end);
+  }
+  if (si < 0) si = 0;
+  if (ei > N - 1 || ei < 0) ei = N - 1;
+  if (si >= ei) { si = 0; ei = N - 1; }
+
+  const dates = al.dates.slice(si, ei + 1);
+  const pairs = cvxPeriodicPairs(dates, al.a.slice(si, ei + 1), al.b.slice(si, ei + 1), freq);
+  const res = {
+    fullDates: al.dates, dates, pairs, n: pairs.f.length,
+    fundLabel: fund.name.trim(), benchLabel: bench.name.trim(),
+    span: `${fmtDate(dates[0])} → ${fmtDate(dates[dates.length - 1])}`,
+  };
+  if (pairs.f.length < 6) {
+    res.err = `Échantillon trop court : ${pairs.f.length} obs. ${CVX_FREQ_LABEL[freq]}`;
+    return res;
+  }
+  res.cap = captureRatios(pairs.f, pairs.b);
+  res.q = quadFit(pairs.b, pairs.f);
+  const bl = beta(pairs.f, pairs.b);
+  res.lin = { beta: bl, alpha: mean(pairs.f) - bl * mean(pairs.b) };
+  res.corr = correlation(pairs.f, pairs.b);
+  res.buckets = cvxBucketStats(pairs.f, pairs.b);
+  return res;
+}
+
+// --- Lignes de tableau (label, valeur numérique, unité, sens de lecture) ---
+const cvxFmt = (v, unit, dec, sign) => {
+  if (v == null || !isFinite(v)) return '—';
+  const s = ((sign || unit === 'pp') && v >= 0 ? '+' : '') + v.toFixed(dec);
+  return unit === '%' ? s + '%' : unit === 'pp' ? s + ' pp' : unit === 'x' ? s + 'x' : s;
+};
+// Une différence de deux pourcentages s'exprime en points de pourcentage ;
+// les mesures sans unité (betas, R², t-stat, coefficient c) restent nues.
+const cvxDiffFmt = (v, unit, dec) =>
+  cvxFmt(v, unit === '%' ? 'pp' : unit, dec, true);
+// kind : 'up' (>100% favorable), 'dn' (<100% favorable), 'pos' (>0 favorable),
+// 'ratio' (>1 favorable), '' (neutre)
+const cvxCls = (v, kind) => {
+  if (v == null || !isFinite(v) || !kind) return '';
+  if (kind === 'up') return pctClass(v - 100);
+  if (kind === 'dn') return pctClass(100 - v);
+  if (kind === 'ratio') return pctClass(v - 1);
+  return pctClass(v);
+};
+
+function cvxCaptureRows(a, freq) {
+  const c = a.cap;
+  const spread = (c.upCapM != null && c.dnCapM != null) ? c.upCapM - c.dnCapM : null;
+  const ratio = (c.upCapM != null && c.dnCapM != null && c.dnCapM !== 0) ? c.upCapM / c.dnCapM : null;
+  const asym = (c.betaUp != null && c.betaDn != null) ? c.betaUp - c.betaDn : null;
+  // La capture composée (convention Morningstar) n'a de sens qu'en basse
+  // fréquence : cumulée sur des centaines de périodes de même signe, elle diverge.
+  const compOK = freq === 'monthly' || freq === 'quarterly';
+  return [
+    { label: 'Périodes de hausse du benchmark', v: c.nUp, unit: '', dec: 0 },
+    { label: 'Périodes de baisse du benchmark', v: c.nDn, unit: '', dec: 0 },
+    { label: 'Participation à la hausse', v: c.upCapM, unit: '%', dec: 1, kind: 'up' },
+    { label: 'Participation à la baisse', v: c.dnCapM, unit: '%', dec: 1, kind: 'dn' },
+    { label: 'Écart de capture (hausse − baisse)', v: spread, unit: 'pp', dec: 1, kind: 'pos' },
+    { label: 'Ratio de capture (hausse / baisse)', v: ratio, unit: 'x', dec: 2, kind: 'ratio' },
+    { label: 'Participation à la hausse (composée)', v: compOK ? c.upCapC : null, unit: '%', dec: 1,
+      kind: compOK ? 'up' : '', txt: compOK ? null : 'n/a (fréquence trop fine)' },
+    { label: 'Participation à la baisse (composée)', v: compOK ? c.dnCapC : null, unit: '%', dec: 1,
+      kind: compOK ? 'dn' : '', txt: compOK ? null : 'n/a (fréquence trop fine)' },
+    { label: 'Beta haussier (β↑)', v: c.betaUp, unit: '', dec: 3 },
+    { label: 'Beta baissier (β↓)', v: c.betaDn, unit: '', dec: 3 },
+    { label: 'Asymétrie de beta (β↑ − β↓)', v: asym, unit: '', dec: 3, kind: 'pos', sign: true },
+    { label: 'Perf. moyenne quand le marché monte', txt: fmtPct(c.avgUpF) + ' vs ' + fmtPct(c.avgUpB) },
+    { label: 'Perf. moyenne quand le marché baisse', txt: fmtPct(c.avgDnF) + ' vs ' + fmtPct(c.avgDnB) },
+    { label: '% de hausses où le fonds progresse', v: c.battingUp, unit: '%', dec: 1 },
+    { label: '% de baisses où le fonds résiste mieux', v: c.battingDn, unit: '%', dec: 1 },
+  ];
+}
+
+function cvxConvexRows(a, freq) {
+  const perYear = { daily: 252, weekly: 52, monthly: 12, quarterly: 4 }[freq];
+  const q = a.q;
+  const rows = [
+    { label: 'Beta linéaire', v: a.lin.beta, unit: '', dec: 3 },
+    { label: 'Alpha par période', v: a.lin.alpha, unit: '%', dec: 3, kind: 'pos' },
+    { label: 'Alpha annualisé (approx.)', v: a.lin.alpha * perYear, unit: '%', dec: 2, kind: 'pos' },
+    { label: 'R² (linéaire)', v: a.corr * a.corr, unit: '', dec: 3 },
+  ];
+  if (!q) return rows.concat([{ label: 'Convexité', txt: 'échantillon insuffisant' }]);
+  const signif = q.tC != null && Math.abs(q.tC) >= 1.96;
+  return rows.concat([
+    { label: 'Convexité (coeff. quadratique c)', v: q.c, unit: '', dec: 4, kind: 'pos', sign: true },
+    { label: 't-stat de c', v: q.tC, unit: '', dec: 2, kind: signif ? 'pos' : '' },
+    { label: 'R² (quadratique)', v: q.r2, unit: '', dec: 3 },
+    { label: 'Beta au point milieu (b)', v: q.b, unit: '', dec: 3 },
+    { label: 'Beta à −5% de marché', v: q.b + 2 * q.c * -5, unit: '', dec: 3 },
+    { label: 'Beta à +5% de marché', v: q.b + 2 * q.c * 5, unit: '', dec: 3 },
+    { label: 'Profil', txt: (q.c > 0 ? 'Convexe' : 'Concave') + (signif ? ' (significatif)' : ' (non significatif)'),
+      cls: pctClass(q.c) },
+  ]);
+}
+
+// Rend un tableau à 2 colonnes (référence seule) ou 4 colonnes (avec comparaison).
+function cvxRenderTable(rowsA, rowsB, headA, headB) {
+  let h = '<table><tr><th>Mesure</th>';
+  h += rowsB ? `<th>${headA}</th><th>${headB}</th><th>Écart</th></tr>` : '<th>Valeur</th></tr>';
+  rowsA.forEach((r, i) => {
+    const cell = row => row.txt != null
+      ? `<td class="${row.cls || ''}">${row.txt}</td>`
+      : `<td class="${cvxCls(row.v, row.kind)}">${cvxFmt(row.v, row.unit, row.dec, row.sign)}</td>`;
+    h += `<tr><td style="font-weight:500;color:var(--text-primary)">${r.label}</td>${cell(r)}`;
+    if (rowsB) {
+      const rb = rowsB[i] || {};
+      h += cell(rb);
+      const d = (r.txt == null && rb.txt == null && r.v != null && rb.v != null
+        && isFinite(r.v) && isFinite(rb.v)) ? r.v - rb.v : null;
+      h += `<td class="${d == null ? '' : pctClass(d)}">${d == null ? '—' : cvxDiffFmt(d, r.unit, r.dec)}</td>`;
+    }
+    h += '</tr>';
+  });
+  return h + '</table>';
+}
+
+// Séries glissantes : participation, écart, betas conditionnels ou convexité.
+function cvxRollSeries(pairs, win, metric) {
+  const out = { labels: [], s1: [], s2: [] };
+  const m = pairs.f.length;
+  if (m < win) return out;
+  for (let i = win - 1; i < m; i++) {
+    const wf = pairs.f.slice(i - win + 1, i + 1), wb = pairs.b.slice(i - win + 1, i + 1);
+    out.labels.push(pairs.labels[i]);
+    if (metric === 'convex') {
+      const q = win >= 12 ? quadFit(wb, wf) : null;
+      out.s1.push(q ? q.c : null); out.s2.push(null);
+      continue;
+    }
+    const c = captureRatios(wf, wb);
+    const up = c.nUp >= 3 ? c.upCapM : null, dn = c.nDn >= 3 ? c.dnCapM : null;
+    if (metric === 'capture') { out.s1.push(up); out.s2.push(dn); }
+    else if (metric === 'spread') { out.s1.push(up != null && dn != null ? up - dn : null); out.s2.push(null); }
+    else { out.s1.push(c.betaUp); out.s2.push(c.betaDn); }
+  }
+  return out;
+}
+
+const CVX_ROLL_META = {
+  capture: { axis: 'Participation (%)', n1: 'Participation à la hausse (%)', n2: 'Participation à la baisse (%)' },
+  spread:  { axis: 'Écart de participation (pp)', n1: 'Hausse − baisse (pp)', n2: null },
+  beta:    { axis: 'Beta conditionnel', n1: 'Beta haussier (β↑)', n2: 'Beta baissier (β↓)' },
+  convex:  { axis: 'Coefficient de convexité c', n1: 'Convexité (c)', n2: null },
+};
+
+// Union de deux plages (null = borne ouverte sur les données disponibles).
+function cvxUnionRange(a, b) {
+  if (!a || !b) return null;
+  return {
+    start: (a.start == null || b.start == null) ? null : Math.min(a.start, b.start),
+    end: (a.end == null || b.end == null) ? null : Math.max(a.end, b.end),
+  };
+}
+
+// Période B par défaut : tout ce qui précède la période A, sinon la 1ère moitié.
+function cvxDefaultPeriodB(base) {
+  const fd = base.fullDates;
+  const aStart = base.dates[0].getTime();
+  if (aStart > fd[0].getTime()) return { start: null, end: aStart };
+  return { start: null, end: fd[Math.floor(fd.length / 2)].getTime() };
+}
+
 function renderConvex() {
   const info = document.getElementById('cvxPeriodInfo');
   const clear = msg => {
@@ -3410,154 +3689,95 @@ function renderConvex() {
     ['cvxCapture', 'cvxConvex', 'cvxBuckets'].forEach(id => {
       const el = document.getElementById(id); if (el) el.innerHTML = '';
     });
-    const note = document.getElementById('cvxScatterNote'); if (note) note.textContent = '';
+    ['cvxScatterNote', 'cvxRollInfo'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = '';
+    });
     ['chartConvexScatter', 'chartConvexBuckets', 'chartConvexRolling'].forEach(destroyChart);
   };
 
   const st = STATE.convex = STATE.convex || {};
   if (!st.freq) st.freq = 'monthly';
-  const fund = seriesFor(st.fund), bench = seriesFor(st.bench);
-  if (!fund || !bench) { clear('Chargez au moins deux séries (fonds + benchmark).'); return; }
-  if (fund.name === bench.name) { clear('Sélectionnez deux séries différentes.'); return; }
-
-  const alFull = alignSeries(fund, bench);
-  if (alFull.dates.length < 5) { clear('Pas de période commune suffisante entre ces deux séries.'); return; }
-
+  if (!st.cmpMode) st.cmpMode = 'none';
   cvxWireBar();
-  _cvxAlignedDates = alFull.dates;
+  cvxSyncCmpBoxes();
 
-  // Sous-période sélectionnée
-  const N = alFull.dates.length;
-  let si = 0, ei = N - 1;
-  const rg = st.range;
-  if (rg) {
-    if (rg.start != null) si = cmpFirstIdxGE(alFull.dates, rg.start);
-    if (rg.end != null) ei = cmpLastIdxLE(alFull.dates, rg.end);
-  }
-  if (si < 0) si = 0;
-  if (ei > N - 1 || ei < 0) ei = N - 1;
-  if (si >= ei) { si = 0; ei = N - 1; }
+  const base = cvxAnalyse(st.fund, st.bench, st.range, st.freq);
+  if (!base.fullDates) { clear(base.err); return; }
+  _cvxAlignedDates = base.fullDates;
 
-  const dates = alFull.dates.slice(si, ei + 1);
-  const pa = alFull.a.slice(si, ei + 1);
-  const pb = alFull.b.slice(si, ei + 1);
+  const fd = base.fullDates, F = fd.length;
   const dStart = document.getElementById('cvxDateStart'), dEnd = document.getElementById('cvxDateEnd');
-  dStart.min = dEnd.min = fmtDate(alFull.dates[0]);
-  dStart.max = dEnd.max = fmtDate(alFull.dates[N - 1]);
-  dStart.value = fmtDate(dates[0]); dEnd.value = fmtDate(dates[dates.length - 1]);
+  dStart.min = dEnd.min = fmtDate(fd[0]); dStart.max = dEnd.max = fmtDate(fd[F - 1]);
+  dStart.value = fmtDate(base.dates[0]); dEnd.value = fmtDate(base.dates[base.dates.length - 1]);
 
-  const fundLabel = fund.name.trim(), benchLabel = bench.name.trim();
-  const pairs = cvxPeriodicPairs(dates, pa, pb, st.freq);
-  const f = pairs.f, b = pairs.b, m = f.length;
-  if (m < 6) {
-    clear(`Échantillon trop court : ${m} obs. ${CVX_FREQ_LABEL[st.freq]} — élargissez la période ou choisissez une fréquence plus fine.`);
-    return;
+  if (base.err) { clear(base.err + ' — élargissez la période ou choisissez une fréquence plus fine.'); return; }
+
+  // ---- Comparaison éventuelle : autre période, ou autre couple de séries ----
+  let cmp = null, cmpWarn = '', headA = 'A', headB = 'B', legend = '';
+  if (st.cmpMode === 'period') {
+    if (!st.cmpRange) st.cmpRange = cvxDefaultPeriodB(base);
+    const cs = document.getElementById('cvxCmpStart'), ce = document.getElementById('cvxCmpEnd');
+    cs.min = ce.min = fmtDate(fd[0]); cs.max = ce.max = fmtDate(fd[F - 1]);
+    const res = cvxAnalyse(st.fund, st.bench, st.cmpRange, st.freq);
+    if (res.dates) { cs.value = fmtDate(res.dates[0]); ce.value = fmtDate(res.dates[res.dates.length - 1]); }
+    if (res.err) cmpWarn = ` · comparaison indisponible (${res.err})`;
+    else {
+      cmp = res;
+      headA = `A · ${base.span}`; headB = `B · ${cmp.span}`;
+      legend = ` · comparaison période B : ${cmp.span} (${cmp.n} obs.)`;
+    }
+  } else if (st.cmpMode === 'pair') {
+    const res = cvxAnalyse(st.cmpFund, st.cmpBench, st.range, st.freq);
+    if (res.err) cmpWarn = ` · comparaison indisponible (${res.err})`;
+    else {
+      cmp = res;
+      headA = `A · ${base.fundLabel}`; headB = `B · ${cmp.fundLabel}`;
+      legend = ` · comparaison B : ${cmp.fundLabel} vs ${cmp.benchLabel} (${cmp.n} obs.)`;
+    }
   }
 
-  const cap = captureRatios(f, b);
   if (info) info.textContent =
-    `Sélection : ${fmtDate(dates[0])} → ${fmtDate(dates[dates.length - 1])} · ` +
-    `${m} périodes ${CVX_FREQ_LABEL[st.freq]} (${cap.nUp} de hausse, ${cap.nDn} de baisse) · ` +
-    `commun total : ${fmtDate(alFull.dates[0])} → ${fmtDate(alFull.dates[N - 1])}`;
+    `Sélection : ${base.span} · ${base.n} périodes ${CVX_FREQ_LABEL[st.freq]} ` +
+    `(${base.cap.nUp} de hausse, ${base.cap.nDn} de baisse) · ` +
+    `commun total : ${fmtDate(fd[0])} → ${fmtDate(fd[F - 1])}` + legend + cmpWarn;
 
-  // ---- Table participation hausse / baisse ----
-  const p1 = v => v == null ? '—' : v.toFixed(1) + '%';
-  const p2 = v => v == null ? '—' : fmtPct(v);
-  const r3 = v => v == null ? '—' : v.toFixed(3);
-  const spread = (cap.upCapM != null && cap.dnCapM != null) ? cap.upCapM - cap.dnCapM : null;
-  const capRatio = (cap.upCapM != null && cap.dnCapM != null && cap.dnCapM !== 0) ? cap.upCapM / cap.dnCapM : null;
-  const betaAsym = (cap.betaUp != null && cap.betaDn != null) ? cap.betaUp - cap.betaDn : null;
-  // La capture composée (convention Morningstar) n'a de sens qu'en basse
-  // fréquence : cumulée sur des centaines de jours de même signe, elle diverge.
-  const compOK = st.freq === 'monthly' || st.freq === 'quarterly';
-  const capRows = [
-    ['Périodes de hausse du benchmark', String(cap.nUp), ''],
-    ['Périodes de baisse du benchmark', String(cap.nDn), ''],
-    ['Participation à la hausse', p1(cap.upCapM), 'up'],
-    ['Participation à la baisse', p1(cap.dnCapM), 'dn'],
-    ['Écart de capture (hausse − baisse)', spread == null ? '—' : (spread >= 0 ? '+' : '') + spread.toFixed(1) + ' pp', 'pos'],
-    ['Ratio de capture (hausse / baisse)', capRatio == null ? '—' : capRatio.toFixed(2) + 'x', 'ratio'],
-    ['Participation à la hausse (composée)', compOK ? p1(cap.upCapC) : 'n/a (fréquence trop fine)', compOK ? 'up' : ''],
-    ['Participation à la baisse (composée)', compOK ? p1(cap.dnCapC) : 'n/a (fréquence trop fine)', compOK ? 'dn' : ''],
-    ['Beta haussier (β↑)', r3(cap.betaUp), ''],
-    ['Beta baissier (β↓)', r3(cap.betaDn), ''],
-    ['Asymétrie de beta (β↑ − β↓)', betaAsym == null ? '—' : (betaAsym >= 0 ? '+' : '') + betaAsym.toFixed(3), 'pos'],
-    ['Perf. moyenne quand le marché monte', p2(cap.avgUpF) + ' vs ' + p2(cap.avgUpB), ''],
-    ['Perf. moyenne quand le marché baisse', p2(cap.avgDnF) + ' vs ' + p2(cap.avgDnB), ''],
-    ['% de hausses où le fonds progresse', p1(cap.battingUp), ''],
-    ['% de baisses où le fonds résiste mieux', p1(cap.battingDn), ''],
-  ];
-  let capHtml = '<table><tr><th>Mesure</th><th>Valeur</th></tr>';
-  capRows.forEach(([label, val, kind]) => {
-    let cls = '';
-    const num = parseFloat(String(val).replace(/[+%x]|\s?pp/g, ''));
-    if (!isNaN(num)) {
-      if (kind === 'up') cls = pctClass(num - 100);        // >100% de capture haussière = favorable
-      else if (kind === 'dn') cls = pctClass(100 - num);   // <100% de capture baissière = favorable
-      else if (kind === 'pos') cls = pctClass(num);
-      else if (kind === 'ratio') cls = pctClass(num - 1);
-    }
-    capHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${label}</td><td class="${cls}">${val}</td></tr>`;
-  });
-  capHtml += '</table>';
-  capHtml += `<div class="ctrl-label" style="margin-top:10px;line-height:1.5;">` +
+  // ---- Tableaux participation & convexité ----
+  const capNote = `<div class="ctrl-label" style="margin-top:10px;line-height:1.5;">` +
     `Participation = rendement moyen du fonds ÷ rendement moyen du benchmark, sur les seules périodes de hausse (resp. de baisse) du benchmark. ` +
     `Un profil défensif recherche &gt; 100% à la hausse et &lt; 100% à la baisse. ` +
     `La variante composée (convention Morningstar) chaîne les rendements de chaque camp : elle n'est affichée qu'en fréquence mensuelle ou trimestrielle.</div>`;
-  document.getElementById('cvxCapture').innerHTML = capHtml;
-
-  // ---- Régression quadratique (convexité) ----
-  const q = quadFit(b, f);
-  const lin = { beta: beta(f, b), alpha: mean(f) - beta(f, b) * mean(b) };
-  const corr = correlation(f, b);
-  const perYear = { daily: 252, weekly: 52, monthly: 12, quarterly: 4 }[st.freq];
-  let convHtml = '<table><tr><th>Mesure</th><th>Valeur</th></tr>';
-  const cvRow = (label, val, cls = '') =>
-    convHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${label}</td><td class="${cls}">${val}</td></tr>`;
-  cvRow('Beta linéaire', r3(lin.beta));
-  cvRow('Alpha par période', fmtPct(lin.alpha, 3), pctClass(lin.alpha));
-  cvRow('Alpha annualisé (approx.)', fmtPct(lin.alpha * perYear), pctClass(lin.alpha * perYear));
-  cvRow('R² (linéaire)', (corr * corr).toFixed(3));
-  if (q) {
-    cvRow('Convexité (coeff. quadratique c)', (q.c >= 0 ? '+' : '') + q.c.toFixed(4), pctClass(q.c));
-    cvRow('t-stat de c', q.tC == null ? '—' : q.tC.toFixed(2),
-      q.tC != null && Math.abs(q.tC) >= 1.96 ? pctClass(q.tC) : '');
-    cvRow('R² (quadratique)', q.r2 == null ? '—' : q.r2.toFixed(3));
-    cvRow('Beta au point milieu (b)', q.b.toFixed(3));
-    cvRow('Beta à −5% de marché', (q.b + 2 * q.c * -5).toFixed(3));
-    cvRow('Beta à +5% de marché', (q.b + 2 * q.c * 5).toFixed(3));
-    const signif = q.tC != null && Math.abs(q.tC) >= 1.96;
-    const verdict = q.c > 0
-      ? (signif ? 'Convexe (significatif)' : 'Convexe (non significatif)')
-      : (signif ? 'Concave (significatif)' : 'Concave (non significatif)');
-    cvRow('Profil', verdict, pctClass(q.c));
-  } else {
-    cvRow('Convexité', 'échantillon insuffisant');
-  }
-  convHtml += '</table>';
-  document.getElementById('cvxConvex').innerHTML = convHtml;
+  document.getElementById('cvxCapture').innerHTML =
+    cvxRenderTable(cvxCaptureRows(base, st.freq), cmp ? cvxCaptureRows(cmp, st.freq) : null, headA, headB) + capNote;
+  document.getElementById('cvxConvex').innerHTML =
+    cvxRenderTable(cvxConvexRows(base, st.freq), cmp ? cvxConvexRows(cmp, st.freq) : null, headA, headB);
 
   // ---- Nuage de points + ajustements ----
   destroyChart('chartConvexScatter');
-  const xMin = Math.min(...b), xMax = Math.max(...b);
-  const grid = Array.from({ length: 60 }, (_, i) => xMin + (xMax - xMin) * i / 59);
-  const scatterSets = [
-    {
-      type: 'scatter', label: `${fundLabel} vs ${benchLabel}`,
-      data: b.map((x, i) => ({ x, y: f[i] })),
-      backgroundColor: CMP_BLUE + 'aa', borderColor: CMP_BLUE, pointRadius: 3, pointHoverRadius: 5,
-    },
-    {
-      type: 'line', label: 'Ajustement linéaire',
-      data: grid.map(x => ({ x, y: lin.alpha + lin.beta * x })),
-      borderColor: CMP_AMBER, borderWidth: 1.6, pointRadius: 0, borderDash: [5, 4], fill: false, tension: 0,
-    },
-  ];
-  if (q) scatterSets.push({
-    type: 'line', label: 'Ajustement quadratique',
-    data: grid.map(x => ({ x, y: q.a + q.b * x + q.c * x * x })),
-    borderColor: '#00e19a', borderWidth: 2, pointRadius: 0, fill: false, tension: 0,
-  });
+  const fitSets = (a, color, dash, tag) => {
+    const xMin = Math.min(...a.pairs.b), xMax = Math.max(...a.pairs.b);
+    const grid = Array.from({ length: 60 }, (_, i) => xMin + (xMax - xMin) * i / 59);
+    const sets = [
+      { type: 'scatter', label: tag ? `Points ${tag}` : `${a.fundLabel} vs ${a.benchLabel}`,
+        data: a.pairs.b.map((x, i) => ({ x, y: a.pairs.f[i] })),
+        backgroundColor: color + 'aa', borderColor: color, pointRadius: 3, pointHoverRadius: 5 },
+      { type: 'line', label: `Ajustement linéaire${tag ? ' ' + tag : ''}`,
+        data: grid.map(x => ({ x, y: a.lin.alpha + a.lin.beta * x })),
+        borderColor: CMP_AMBER, borderWidth: 1.4, pointRadius: 0, borderDash: [5, 4], fill: false, tension: 0 },
+    ];
+    if (a.q) sets.push({
+      type: 'line', label: `Ajustement quadratique${tag ? ' ' + tag : ''}`,
+      data: grid.map(x => ({ x, y: a.q.a + a.q.b * x + a.q.c * x * x })),
+      borderColor: tag ? '#a855f7' : '#00e19a', borderWidth: 2, pointRadius: 0,
+      borderDash: dash, fill: false, tension: 0,
+    });
+    return sets;
+  };
+  let scatterSets = fitSets(base, CMP_BLUE, undefined, cmp ? 'A' : '');
+  if (cmp) {
+    // La droite linéaire de B ferait doublon visuel : on garde points + quadratique.
+    const s = fitSets(cmp, '#a855f7', [6, 4], 'B');
+    scatterSets = scatterSets.concat([s[0], s[2]].filter(Boolean));
+  }
   STATE.charts['chartConvexScatter'] = new Chart(document.getElementById('chartConvexScatter'), {
     data: { datasets: scatterSets },
     options: {
@@ -3567,20 +3787,18 @@ function renderConvex() {
         ...chartOpts('').plugins,
         tooltip: {
           ...chartOpts('').plugins.tooltip,
-          callbacks: {
-            label: ctx => `${benchLabel}: ${ctx.parsed.x.toFixed(2)}% → ${fundLabel}: ${ctx.parsed.y.toFixed(2)}%`
-          }
+          callbacks: { label: ctx => `x: ${ctx.parsed.x.toFixed(2)}% → y: ${ctx.parsed.y.toFixed(2)}%` }
         }
       },
       scales: {
         x: {
           type: 'linear',
-          title: { display: true, text: `${benchLabel} (%, ${CVX_FREQ_LABEL[st.freq]})`, color: '#8b92a5', font: { size: 11 } },
+          title: { display: true, text: `Benchmark (%, ${CVX_FREQ_LABEL[st.freq]})`, color: '#8b92a5', font: { size: 11 } },
           ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
           grid: { color: 'rgba(37,42,54,0.5)' },
         },
         y: {
-          title: { display: true, text: `${fundLabel} (%)`, color: '#8b92a5', font: { size: 11 } },
+          title: { display: true, text: 'Fonds (%)', color: '#8b92a5', font: { size: 11 } },
           ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
           grid: { color: 'rgba(37,42,54,0.5)' },
         }
@@ -3589,60 +3807,60 @@ function renderConvex() {
   });
   const note = document.getElementById('cvxScatterNote');
   if (note) {
+    const q = base.q;
     note.textContent = q
       ? `c = ${q.c.toFixed(4)} : ${q.c > 0
           ? 'la pente augmente avec le marché — le fonds capte davantage la hausse que la baisse (convexité positive).'
           : 'la pente diminue avec le marché — le fonds subit davantage la baisse que la hausse (concavité).'}` +
-        ` Beta local = b + 2c·x, soit ${(q.b + 2 * q.c * -5).toFixed(2)} à −5% et ${(q.b + 2 * q.c * 5).toFixed(2)} à +5% de marché.`
+        ` Beta local = b + 2c·x, soit ${(q.b + 2 * q.c * -5).toFixed(2)} à −5% et ${(q.b + 2 * q.c * 5).toFixed(2)} à +5% de marché.` +
+        (cmp && cmp.q ? ` Comparaison B : c = ${cmp.q.c.toFixed(4)}.` : '')
       : '';
   }
 
   // ---- Quintiles de marché ----
-  const order = b.map((v, i) => i).sort((i, j) => b[i] - b[j]);
-  const NB = 5;
-  const buckets = [];
-  for (let k = 0; k < NB; k++) {
-    const lo = Math.floor(k * order.length / NB), hi = Math.floor((k + 1) * order.length / NB);
-    const idx = order.slice(lo, hi);
-    if (!idx.length) continue;
-    const bs = idx.map(i => b[i]), fs = idx.map(i => f[i]);
-    const mb = mean(bs), mf = mean(fs);
-    buckets.push({
-      label: `Q${k + 1}`,
-      range: `${bs[0].toFixed(1)}% → ${bs[bs.length - 1].toFixed(1)}%`,
-      n: idx.length, mb, mf,
-      part: mb !== 0 ? mf / mb * 100 : null,
-      hit: fs.filter((v, i) => v > bs[i]).length / idx.length * 100,
-    });
-  }
-  let bHtml = '<table><tr><th>Quintile</th><th>Plage benchmark</th><th>n</th><th>Moy. bench</th><th>Moy. fonds</th><th>Participation</th><th>% surperf.</th></tr>';
-  buckets.forEach(bk => {
-    // Participation favorable : >100% dans les quintiles haussiers, <100% dans les baissiers.
+  const bkRow = bk => {
     const good = bk.part == null ? 0 : (bk.mb >= 0 ? bk.part - 100 : 100 - bk.part);
-    bHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${bk.label}</td>` +
-      `<td>${bk.range}</td><td>${bk.n}</td>` +
+    return `<td>${bk.range}</td><td>${bk.n}</td>` +
       `<td class="${pctClass(bk.mb)}">${fmtPct(bk.mb)}</td>` +
       `<td class="${pctClass(bk.mf)}">${fmtPct(bk.mf)}</td>` +
       `<td class="${pctClass(good)}">${bk.part == null ? '—' : bk.part.toFixed(1) + '%'}</td>` +
-      `<td>${bk.hit.toFixed(0)}%</td></tr>`;
+      `<td>${bk.hit.toFixed(0)}%</td>`;
+  };
+  let bHtml = '<table><tr><th>Quintile</th><th>Plage benchmark</th><th>n</th><th>Moy. bench</th><th>Moy. fonds</th><th>Participation</th><th>% surperf.</th></tr>';
+  base.buckets.forEach(bk => {
+    bHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">${cmp ? 'A · ' : ''}${bk.label}</td>${bkRow(bk)}</tr>`;
   });
+  if (cmp) {
+    bHtml += `<tr><td colspan="7" style="color:var(--accent-purple);font-weight:500">Comparaison B — ${headB.replace(/^B · /, '')}</td></tr>`;
+    cmp.buckets.forEach(bk => {
+      bHtml += `<tr><td style="font-weight:500;color:var(--text-primary)">B · ${bk.label}</td>${bkRow(bk)}</tr>`;
+    });
+  }
   bHtml += '</table>';
   document.getElementById('cvxBuckets').innerHTML = bHtml;
 
   destroyChart('chartConvexBuckets');
+  const bkSets = [
+    { label: cmp ? 'Benchmark A' : base.benchLabel, data: base.buckets.map(bk => bk.mb), backgroundColor: CMP_AMBER + 'cc', borderWidth: 0 },
+    { label: cmp ? 'Fonds A' : base.fundLabel, data: base.buckets.map(bk => bk.mf), backgroundColor: CMP_BLUE + 'cc', borderWidth: 0 },
+  ];
+  if (cmp) bkSets.push(
+    { label: 'Benchmark B', data: cmp.buckets.map(bk => bk.mb), backgroundColor: '#ffb84d55', borderWidth: 0 },
+    { label: 'Fonds B', data: cmp.buckets.map(bk => bk.mf), backgroundColor: '#a855f7cc', borderWidth: 0 },
+  );
   STATE.charts['chartConvexBuckets'] = new Chart(document.getElementById('chartConvexBuckets'), {
     type: 'bar',
     data: {
-      labels: buckets.map(bk => `${bk.label} (${bk.range})`),
-      datasets: [
-        { label: benchLabel, data: buckets.map(bk => bk.mb), backgroundColor: CMP_AMBER + 'cc', borderWidth: 0 },
-        { label: fundLabel, data: buckets.map(bk => bk.mf), backgroundColor: CMP_BLUE + 'cc', borderWidth: 0 },
-      ]
+      labels: base.buckets.map(bk => cmp ? bk.label : `${bk.label} (${bk.range})`),
+      datasets: bkSets,
     },
     options: {
       ...chartOpts(''),
       scales: {
-        x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 } }, grid: { display: false } },
+        x: {
+          title: cmp ? { display: true, text: 'Quintiles propres à chaque relation (plages dans le tableau)', color: '#8b92a5', font: { size: 10 } } : { display: false },
+          ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 } }, grid: { display: false }
+        },
         y: {
           title: { display: true, text: `Rendement moyen (%, ${CVX_FREQ_LABEL[st.freq]})`, color: '#8b92a5', font: { size: 11 } },
           ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
@@ -3652,44 +3870,68 @@ function renderConvex() {
     }
   });
 
-  // ---- Capture glissante ----
+  // ---- Mesures glissantes ----
   destroyChart('chartConvexRolling');
+  const metric = st.rollMetric || 'capture';
   const win = st.rollWin || CVX_ROLL_DEFAULT[st.freq];
-  const rollLabels = [], rollUp = [], rollDn = [];
-  if (m >= win) {
-    for (let i = win - 1; i < m; i++) {
-      const wf = f.slice(i - win + 1, i + 1), wb = b.slice(i - win + 1, i + 1);
-      const c = captureRatios(wf, wb);
-      rollLabels.push(pairs.labels[i]);
-      rollUp.push(c.nUp >= 3 ? c.upCapM : null);
-      rollDn.push(c.nDn >= 3 ? c.dnCapM : null);
+  const meta = CVX_ROLL_META[metric];
+  // En comparaison de périodes, on déroule sur l'union des deux fenêtres pour
+  // que A et B apparaissent sur la même chronologie.
+  const rollBase = (st.cmpMode === 'period' && cmp)
+    ? (cvxAnalyse(st.fund, st.bench, cvxUnionRange(st.range || {}, st.cmpRange || {}), st.freq) || base)
+    : base;
+  const src = rollBase.pairs ? rollBase : base;
+  const roll = cvxRollSeries(src.pairs, win, metric);
+  const rollInfo = document.getElementById('cvxRollInfo');
+  if (!roll.labels.length) {
+    if (rollInfo) rollInfo.textContent =
+      `Fenêtre de ${win} périodes trop longue pour l'échantillon (${src.n} obs.) — réduisez la fenêtre ou élargissez la période.`;
+  } else {
+    const sets = [{
+      label: meta.n1, data: roll.s1, borderColor: metric === 'capture' ? '#00e19a' : CMP_BLUE,
+      backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1, spanGaps: true,
+    }];
+    if (meta.n2) sets.push({
+      label: meta.n2, data: roll.s2, borderColor: '#ff4d6a', backgroundColor: 'transparent',
+      borderWidth: 1.6, pointRadius: 0, tension: 0.1, spanGaps: true,
+    });
+    if (cmp && st.cmpMode === 'pair') {
+      const rc = cvxRollSeries(cmp.pairs, win, metric);
+      const map1 = new Map(), map2 = new Map();
+      rc.labels.forEach((l, i) => { map1.set(l, rc.s1[i]); map2.set(l, rc.s2[i]); });
+      sets.push({
+        label: meta.n1 + ' — B', data: roll.labels.map(l => map1.has(l) ? map1.get(l) : null),
+        borderColor: '#a855f7', backgroundColor: 'transparent', borderWidth: 1.6, borderDash: [6, 4],
+        pointRadius: 0, tension: 0.1, spanGaps: true,
+      });
+      if (meta.n2) sets.push({
+        label: meta.n2 + ' — B', data: roll.labels.map(l => map2.has(l) ? map2.get(l) : null),
+        borderColor: '#fb923c', backgroundColor: 'transparent', borderWidth: 1.6, borderDash: [6, 4],
+        pointRadius: 0, tension: 0.1, spanGaps: true,
+      });
     }
-  }
-  if (rollLabels.length) {
     STATE.charts['chartConvexRolling'] = new Chart(document.getElementById('chartConvexRolling'), {
       type: 'line',
-      data: {
-        labels: rollLabels,
-        datasets: [
-          { label: 'Participation à la hausse (%)', data: rollUp, borderColor: '#00e19a', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1, spanGaps: true },
-          { label: 'Participation à la baisse (%)', data: rollDn, borderColor: '#ff4d6a', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1, spanGaps: true },
-        ]
-      },
+      data: { labels: roll.labels, datasets: sets },
       options: {
         ...chartOpts(''),
         scales: {
           x: { ticks: { color: '#555d73', font: { family: 'DM Mono', size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(37,42,54,0.5)' } },
           y: {
-            title: { display: true, text: `Capture sur ${win} périodes (%)`, color: '#8b92a5', font: { size: 11 } },
+            title: { display: true, text: `${meta.axis} — fenêtre ${win} périodes`, color: '#8b92a5', font: { size: 11 } },
             ticks: { color: '#555d73', font: { family: 'DM Mono', size: 10 } },
             grid: { color: 'rgba(37,42,54,0.5)' },
           }
         }
       }
     });
+    if (rollInfo) rollInfo.textContent =
+      `Chaque point agrège les ${win} périodes ${CVX_FREQ_LABEL[st.freq]} qui le précèdent` +
+      (metric === 'convex' ? ' (régression quadratique sur la fenêtre).' : '.') +
+      (st.cmpMode === 'period' && cmp ? ' Déroulé sur l\'union des périodes A et B.' : '') +
+      (st.cmpMode === 'pair' && cmp ? ' Les pointillés correspondent à la relation B.' : '');
   }
 }
-
 // ============================================================
 // CORRELATIONS & BETAS TAB
 // ============================================================

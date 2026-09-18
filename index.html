@@ -1171,7 +1171,7 @@ function aoaToRecords(aoa) {
   let hdr = 0;
   for (let i = 0; i < Math.min(aoa.length, 30); i++) {
     const first = aoa[i] && aoa[i][0] != null ? String(aoa[i][0]).trim().toLowerCase() : '';
-    if (first === 'date') { hdr = i; break; }
+    if (/^dates?\b/.test(first)) { hdr = i; break; }
   }
   const headerRow = (aoa[hdr] || []).map(h => (h == null ? '' : String(h).trim()));
   const records = [];
@@ -1231,6 +1231,33 @@ function parseDataset(name, json) {
     for (const c of valueCols) columns[c].push(vals[c]);
   }
 
+  // Bloomberg-style exports carry calendar days: weekends and holidays are
+  // filled forward with the previous close. Those rows would inflate the
+  // observation count (252 obs ≠ 1 year), inject zero daily returns and
+  // distort vol / drawdown / convexity. Drop weekends, then drop weekday
+  // rows on which every series is unchanged (a market holiday).
+  const skipped = { weekend: 0, holiday: 0 };
+  const keep = [];
+  const hasWeekend = dates.some(x => x.getDay() === 0 || x.getDay() === 6);
+  // A single flat series is ambiguous (a NAV can genuinely be unchanged), so
+  // the holiday rule needs either several series or a calendar-day export.
+  const dropFlat = valueCols.length >= 2 || hasWeekend;
+  for (let i = 0; i < dates.length; i++) {
+    const dow = dates[i].getDay();
+    if (dow === 0 || dow === 6) { skipped.weekend++; continue; }
+    if (dropFlat && keep.length > 0) {
+      const prev = keep[keep.length - 1];
+      const flat = valueCols.every(c => columns[c][i] === columns[c][prev]);
+      if (flat) { skipped.holiday++; continue; }
+    }
+    keep.push(i);
+  }
+  if (keep.length !== dates.length) {
+    const kd = keep.map(i => dates[i]);
+    dates.length = 0; kd.forEach(x => dates.push(x));
+    for (const c of valueCols) columns[c] = keep.map(i => columns[c][i]);
+  }
+
   // Ensure chronological (ascending) order — some track-record files are
   // exported most-recent-first, which would break every downstream metric.
   let ascending = true;
@@ -1245,23 +1272,47 @@ function parseDataset(name, json) {
     for (const c of valueCols) columns[c] = order.map(i => columns[c][i]);
   }
 
-  STATE.datasets[name] = { dates, columns, name };
+  STATE.datasets[name] = { dates, columns, name, skipped };
   if (!STATE.activeDataset) STATE.activeDataset = name;
   updateUI();
 }
 
+const MONTHS = { jan:0, feb:1, fev:1, fév:1, mar:2, apr:3, avr:3, may:4, mai:4, jun:5, jui:5, juin:5, jul:6, juil:6, aug:7, aou:7, aoû:7, sep:8, oct:9, nov:10, dec:11, déc:11 };
+// Two-digit years: 00-69 → 2000-2069, 70-99 → 1970-1999.
+function fullYear(y) { return y < 100 ? (y < 70 ? 2000 + y : 1900 + y) : y; }
+function mkDate(y, m, d) {
+  if (m < 0 || m > 11 || d < 1 || d > 31) return null;
+  const dt = new Date(y, m, d);
+  return (dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d) ? dt : null;
+}
+// Parses the formatted cell text. Supported: M/D/YY, M/D/YYYY (Excel/Bloomberg,
+// US order), D-Mon-YY, D-Mon-YYYY, DD-Mon-YYYY (Refinitiv), YYYY-MM-DD and
+// DD.MM.YYYY. Everything is built with the local-calendar constructor so no
+// timezone shift can move a date to the previous/next day.
 function parseDate(s) {
-  if (!s) return null;
-  if (s instanceof Date) return s;
-  // Try MM/DD/YYYY
-  const parts = String(s).split('/');
-  if (parts.length === 3) {
-    const m = parseInt(parts[0]), d = parseInt(parts[1]), y = parseInt(parts[2]);
-    if (y > 1900 && m >= 1 && m <= 12) return new Date(y, m-1, d);
+  if (s == null || s === '') return null;
+  if (s instanceof Date) return isNaN(s) ? null : new Date(s.getFullYear(), s.getMonth(), s.getDate());
+  const str = String(s).trim();
+  let m;
+  // M/D/YY or M/D/YYYY (SheetJS formats Excel dates in US order)
+  if ((m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/))) {
+    let a = +m[1], b = +m[2]; const y = fullYear(+m[3]);
+    // If the first field cannot be a month, the file is D/M/Y.
+    if (a > 12 && b <= 12) [a, b] = [b, a];
+    return mkDate(y, a - 1, b);
   }
-  // ISO
-  const dt = new Date(s);
-  if (!isNaN(dt)) return dt;
+  // D-Mon-YY / D-Mon-YYYY / D Mon YYYY
+  if ((m = str.match(/^(\d{1,2})[-\s/]([A-Za-zéû]{3,5})\.?[-\s/](\d{2}|\d{4})$/))) {
+    const mon = MONTHS[m[2].toLowerCase().slice(0, 4)] ?? MONTHS[m[2].toLowerCase().slice(0, 3)];
+    if (mon != null) return mkDate(fullYear(+m[3]), mon, +m[1]);
+  }
+  // YYYY-MM-DD (optionally followed by a time)
+  if ((m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/))) return mkDate(+m[1], +m[2] - 1, +m[3]);
+  // DD.MM.YYYY
+  if ((m = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/))) return mkDate(fullYear(+m[3]), +m[2] - 1, +m[1]);
+  // Last resort: native parser, normalised to local midnight
+  const dt = new Date(str);
+  if (!isNaN(dt) && dt.getFullYear() > 1900) return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
   return null;
 }
 
@@ -1272,7 +1323,12 @@ function updateUI() {
     const d = STATE.datasets[name];
     const n = d.dates.length;
     const cols = essentialCols(Object.keys(d.columns)).length;
-    return `<div class="file-tag"><span class="check">✓</span>${name} (${cols} indices, ${n} obs)</div>`;
+    const sk = d.skipped || {};
+    const parts = [];
+    if (sk.weekend) parts.push(`${sk.weekend} week-ends`);
+    if (sk.holiday) parts.push(`${sk.holiday} jours fériés`);
+    const skippedTxt = parts.length ? ` · ${parts.join(', ')} ignorés` : '';
+    return `<div class="file-tag" title="${parts.length ? 'Lignes non ouvrées (valeurs recopiées) exclues des calculs' : ''}"><span class="check">✓</span>${name} (${cols} indices, ${n} obs${skippedTxt})</div>`;
   }).join('');
 
   // Status

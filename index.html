@@ -3319,8 +3319,8 @@ function renderOverlay(alFull, fundLabel, benchLabel) {
     data: {
       labels,
       datasets: [
-        { label: `A : ${fmtDate(A.d0)} → ${fmtDate(A.d1)}`, data: rebPad(A.arr), borderColor: '#a855f7', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1 },
-        { label: `B : ${fmtDate(B.d0)} → ${fmtDate(B.d1)}`, data: rebPad(B.arr), borderColor: '#22d3ee', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1 },
+        { label: `A : ${fmtDate(A.d0)} → ${fmtDate(A.d1)} (${fmtPct(totRet(A.arr))})`, data: rebPad(A.arr), borderColor: '#a855f7', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1 },
+        { label: `B : ${fmtDate(B.d0)} → ${fmtDate(B.d1)} (${fmtPct(totRet(B.arr))})`, data: rebPad(B.arr), borderColor: '#22d3ee', backgroundColor: 'transparent', borderWidth: 1.6, pointRadius: 0, tension: 0.1 },
       ]
     },
     options: {

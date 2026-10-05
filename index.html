@@ -2867,12 +2867,29 @@ function triggerDownload(url, name) {
 // background so the image isn't a black rectangle.
 function exportChartImage(chartId, name) {
   const src = document.getElementById(chartId); if (!src) return;
+  // Optional header (title + coloured lines) registered by the chart's renderer.
+  const hdr = STATE.exportHeaders && STATE.exportHeaders[chartId];
+  const dpr = src.clientWidth ? src.width / src.clientWidth : 1;
+  const pad = 14 * dpr, titleH = 18 * dpr, lineH = 16 * dpr;
+  const hdrH = hdr ? pad + titleH + hdr.lines.length * lineH + pad / 2 : 0;
   const tmp = document.createElement('canvas');
-  tmp.width = src.width; tmp.height = src.height;
+  tmp.width = src.width; tmp.height = src.height + hdrH;
   const ctx = tmp.getContext('2d');
   const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg-card').trim() || '#151922';
   ctx.fillStyle = bg; ctx.fillRect(0, 0, tmp.width, tmp.height);
-  ctx.drawImage(src, 0, 0);
+  if (hdr) {
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#e8eaed';
+    ctx.font = `600 ${13 * dpr}px 'Instrument Sans', sans-serif`;
+    ctx.fillText(hdr.title, pad, pad);
+    ctx.font = `${11 * dpr}px 'DM Mono', monospace`;
+    hdr.lines.forEach((l, i) => {
+      const y = pad + titleH + i * lineH;
+      ctx.fillStyle = l.color; ctx.fillRect(pad, y + 2 * dpr, 10 * dpr, 10 * dpr);
+      ctx.fillText(l.text, pad + 16 * dpr, y);
+    });
+  }
+  ctx.drawImage(src, 0, hdrH);
   triggerDownload(tmp.toDataURL('image/jpeg', 0.95), name + '.jpg');
 }
 // XLSX export: the chart's underlying data (labels + one column per series).
@@ -3275,6 +3292,7 @@ function renderOverlay(alFull, fundLabel, benchLabel) {
   destroyChart('chartCompareOverlay');
   if (A.arr.length < 2 || B.arr.length < 2) {
     if (info) info.textContent = 'Sélectionnez deux périodes d\'au moins quelques jours.';
+    if (STATE.exportHeaders) delete STATE.exportHeaders['chartCompareOverlay'];
     return;
   }
   const totRet = arr => (arr[arr.length - 1] / arr[0] - 1) * 100;
@@ -3282,6 +3300,15 @@ function renderOverlay(alFull, fundLabel, benchLabel) {
     `<span style="color:var(--accent-purple)">A : ${fmtDate(A.d0)} → ${fmtDate(A.d1)} (${A.arr.length}j, ${fmtPct(totRet(A.arr))})</span>` +
     ` &nbsp;·&nbsp; <span style="color:var(--accent-cyan)">B : ${fmtDate(B.d0)} → ${fmtDate(B.d1)} (${B.arr.length}j, ${fmtPct(totRet(B.arr))})</span>` +
     ` &nbsp;·&nbsp; ${seriesName}`;
+  // Header drawn above the chart in the JPG export (periods + performance).
+  STATE.exportHeaders = STATE.exportHeaders || {};
+  STATE.exportHeaders['chartCompareOverlay'] = {
+    title: `Superposition de deux périodes — ${seriesName}`,
+    lines: [
+      { color: '#a855f7', text: `A : ${fmtDate(A.d0)} → ${fmtDate(A.d1)}  ·  ${A.arr.length} j  ·  Perf. ${fmtPct(totRet(A.arr))}` },
+      { color: '#22d3ee', text: `B : ${fmtDate(B.d0)} → ${fmtDate(B.d1)}  ·  ${B.arr.length} j  ·  Perf. ${fmtPct(totRet(B.arr))}` },
+    ]
+  };
 
   const maxLen = Math.max(A.arr.length, B.arr.length);
   const labels = Array.from({ length: maxLen }, (_, i) => i);
